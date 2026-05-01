@@ -74,6 +74,8 @@ VITE_FUNCTIONS_URL=http://127.0.0.1:5001/YOUR_PROJECT_ID/us-central1
 
 In production, you can also omit `VITE_FUNCTIONS_URL` entirely and let Firebase Hosting rewrites proxy requests (recommended to avoid CORS).
 
+Important: Vite bakes `VITE_*` values at **build time**. If your CI sets `VITE_FUNCTIONS_URL` to `https://...cloudfunctions.net`, the browser will keep doing cross-origin calls and you can still hit CORS even with Hosting rewrites configured.
+
 Edit `.firebaserc`:
 ```json
 {
@@ -138,6 +140,8 @@ If you still call Cloud Functions directly across origins, make sure deployed fu
 ```bash
 firebase deploy --only functions
 ```
+
+If you must debug cross-origin calls anyway, set `VITE_FORCE_CROSS_ORIGIN_FUNCTIONS_URL=1` at build time (not recommended for production).
 
 ### Excel format
 

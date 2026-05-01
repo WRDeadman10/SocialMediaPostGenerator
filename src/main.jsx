@@ -5,9 +5,23 @@ import html2canvas from "html2canvas";
 import JSZip from "jszip";
 import "./styles.css";
 
-// Production: Firebase Hosting rewrites proxy calls (same-origin, no CORS).
-// Local dev: set VITE_FUNCTIONS_URL to emulator base URL.
-const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || "";
+// Production on Firebase Hosting: use same-origin paths + Hosting rewrites (no CORS).
+// Local dev / emulators: set VITE_FUNCTIONS_URL to the emulator base URL.
+const RAW_FUNCTIONS_URL = String(import.meta.env.VITE_FUNCTIONS_URL || "");
+const FORCE_CROSS_ORIGIN = String(import.meta.env.VITE_FORCE_CROSS_ORIGIN_FUNCTIONS_URL || "") === "1";
+
+function isFirebaseHostingOrigin() {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname || "";
+  return host.endsWith(".web.app") || host.endsWith(".firebaseapp.com");
+}
+
+function resolveFunctionsBaseUrl() {
+  if (typeof window !== "undefined" && isFirebaseHostingOrigin() && !FORCE_CROSS_ORIGIN) return "";
+  return RAW_FUNCTIONS_URL;
+}
+
+const FUNCTIONS_URL = resolveFunctionsBaseUrl();
 
 function fnUrl(endpoint) {
   const base = String(FUNCTIONS_URL || "").replace(/\/+$/, "");
@@ -397,11 +411,13 @@ function App() {
       const isNetwork = error instanceof TypeError && String(error.message || "").toLowerCase().includes("fetch");
       if (!isNetwork) throw error;
       const hint =
-        String(FUNCTIONS_URL || "").includes("YOUR_PROJECT_ID")
-          ? "Set VITE_FUNCTIONS_URL (project id) in .env.local"
-          : (window.location.protocol === "https:" && String(FUNCTIONS_URL || "").startsWith("http:"))
-            ? "Your app is HTTPS but VITE_FUNCTIONS_URL is HTTP (mixed content). Use HTTPS Cloud Functions URL."
-            : "If using emulators, run `npm run emulate` and ensure VITE_FUNCTIONS_URL matches emulator project id.";
+        isFirebaseHostingOrigin() && RAW_FUNCTIONS_URL.includes("cloudfunctions.net") && !FORCE_CROSS_ORIGIN
+          ? "Production build has VITE_FUNCTIONS_URL pointing at cloudfunctions.net. Remove it from build env (recommended) so Hosting rewrites use same-origin /uploadAsset, then redeploy hosting."
+          : String(FUNCTIONS_URL || "").includes("YOUR_PROJECT_ID")
+            ? "Set VITE_FUNCTIONS_URL (project id) in .env.local"
+            : (window.location.protocol === "https:" && String(FUNCTIONS_URL || "").startsWith("http:"))
+              ? "Your app is HTTPS but VITE_FUNCTIONS_URL is HTTP (mixed content). Use HTTPS Cloud Functions URL."
+              : "If using emulators, run `npm run emulate` and ensure VITE_FUNCTIONS_URL matches emulator project id.";
       throw new Error(`Failed to fetch. ${hint}`);
     }
   }
