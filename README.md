@@ -143,6 +143,12 @@ firebase deploy --only functions
 
 If you must debug cross-origin calls anyway, set `VITE_FORCE_CROSS_ORIGIN_FUNCTIONS_URL=1` at build time (not recommended for production).
 
+### Same-origin `/uploadAsset` returns 403
+
+Gen2 HTTP functions run on Cloud Run. If Hosting rewrite hits the service but IAM blocks public access, you get **403**.
+
+This repo sets `invoker: "public"` on the HTTP functions so deploy should grant unauthenticated invoke. If you still see 403 after deploy, open the function in Firebase console → **Cloud Run service** → **Security** → ensure **Allow unauthenticated invocations** is enabled (equivalent to `roles/run.invoker` for `allUsers`).
+
 ### Excel format
 
 **Single post:**

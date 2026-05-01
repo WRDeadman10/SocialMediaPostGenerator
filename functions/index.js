@@ -6,6 +6,7 @@ import { getStorage } from "firebase-admin/storage";
 initializeApp();
 const db = getFirestore();
 const cors = true;
+const invoker = "public";
 
 function setCors(res) {
   res.set("Access-Control-Allow-Origin", "*");
@@ -13,7 +14,7 @@ function setCors(res) {
   res.set("Access-Control-Allow-Headers", "Content-Type");
 }
 
-export const getProjects = onRequest({ cors }, async (req, res) => {
+export const getProjects = onRequest({ cors, invoker }, async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") return res.sendStatus(204);
   try {
@@ -26,7 +27,7 @@ export const getProjects = onRequest({ cors }, async (req, res) => {
   }
 });
 
-export const createProject = onRequest({ cors }, async (req, res) => {
+export const createProject = onRequest({ cors, invoker }, async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") return res.sendStatus(204);
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -54,7 +55,7 @@ export const createProject = onRequest({ cors }, async (req, res) => {
   }
 });
 
-export const saveProject = onRequest({ cors }, async (req, res) => {
+export const saveProject = onRequest({ cors, invoker }, async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") return res.sendStatus(204);
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -73,7 +74,7 @@ export const saveProject = onRequest({ cors }, async (req, res) => {
   }
 });
 
-export const deleteProject = onRequest({ cors }, async (req, res) => {
+export const deleteProject = onRequest({ cors, invoker }, async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") return res.sendStatus(204);
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -97,7 +98,7 @@ const EXT_MAP = {
 };
 
 export const uploadAsset = onRequest(
-  { timeoutSeconds: 120, memory: "512MiB", cors },
+  { timeoutSeconds: 120, memory: "512MiB", cors, invoker },
   async (req, res) => {
     setCors(res);
     if (req.method === "OPTIONS") return res.sendStatus(204);
