@@ -34,9 +34,9 @@ const defaultConfig = {
   theme: "dark", postType: "carousel", bgColor: "#000000", bgDataUrl: "", logoDataUrl: "", logoH: 60,
   titleColor: "#4770ff", paraColor: "#64748b", domainColor: "#94a3b8", ctaBg: "#6366f1", ctaTxt: "#ffffff",
   titleGrad: false, titleG1: "#6366f1", titleG2: "#14b8a6", ctaGrad: false, ctaG1: "#6366f1", ctaG2: "#14b8a6",
-  fontTitle: "DM Sans", fontPara: "DM Sans", fontCta: "DM Sans", wtTitle: 700, wtPara: 400, wtCta: 600,
+  fontTitle: "Aptos", fontPara: "Aptos", fontCta: "Aptos", wtTitle: 700, wtPara: 400, wtCta: 600,
   titleSize: 46, paraSize: 20, ctaSize: 20, gapTP: 20, gapPC: 28, contentWidth: 640,
-  hAlign: "center", vAlign: "top", domain: "www.viitorcloud.com",
+  hAlign: "center", vAlign: "center", domain: "www.viitorcloud.com",
   bars: [{ enabled: true, color: "#6d5dfc", height: 7, weight: 25 }, { enabled: true, color: "#14b8a6", height: 7, weight: 25 }, { enabled: false, color: "#38bdf8", height: 7, weight: 25 }, { enabled: false, color: "#f59e0b", height: 7, weight: 25 }],
   barMode: "side", indicators: true, slideNumbers: true, indicatorPos: "cb",
   alignScope: "all", slide1HAlign: "center", slide1VAlign: "top", ctaHAlign: "center", ctaVAlign: "top",
@@ -179,13 +179,20 @@ function App() {
   const [visible, setVisible] = React.useState({});
   const [projects, setProjects] = React.useState({});
   const [activeProjectId, setActiveProjectId] = React.useState("");
+  const [assetDefaults, setAssetDefaults] = React.useState({});
   const [hydrated, setHydrated] = React.useState(false);
   const [editing, setEditing] = React.useState(null);
   const [toast, setToast] = React.useState("");
   const [showNewProjectModal, setShowNewProjectModal] = React.useState(false);
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [animateSeed, setAnimateSeed] = React.useState(0);
+  const [imagePicker, setImagePicker] = React.useState(null);
+  const [pickerAssets, setPickerAssets] = React.useState([]);
+  const [pickerLoading, setPickerLoading] = React.useState(false);
+  const [uploadLoading, setUploadLoading] = React.useState({});
+  const [busyDefaultAssetId, setBusyDefaultAssetId] = React.useState("");
   const renderRef = React.useRef(null);
+  const pickerUploadRef = React.useRef(null);
   const lastGeneratedCountRef = React.useRef(0);
   const audioCtxRef = React.useRef(null);
 
@@ -200,6 +207,7 @@ function App() {
       .then((data) => {
         if (!data?.projects) { setHydrated(true); return; }
         const restored = data.projects;
+        if (data.assetDefaults) setAssetDefaults(data.assetDefaults);
         const savedActive = localStorage.getItem("activeProjectId") || "";
         const active = (savedActive && restored[savedActive]) ? savedActive : Object.keys(restored)[0] || "";
         setProjects(restored);
@@ -313,6 +321,7 @@ function App() {
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Failed to create project");
       const project = result.project;
+      if (result.assetDefaults) setAssetDefaults(result.assetDefaults);
       setProjects((prev) => ({ ...prev, [project.id]: project }));
       setActiveProjectId(project.id);
       setRows([]);
@@ -422,21 +431,117 @@ function App() {
     }
   }
 
-  async function storeImageAsset(file, kind) {
+  React.useEffect(() => {
+    if (!imagePicker) return;
+    let cancelled = false;
+    setPickerLoading(true);
+    postJson(fnUrl("/listAssets"), { kind: imagePicker.kind, limit: 120 })
+      .then((data) => {
+        if (cancelled) return;
+        const raw = Array.isArray(data?.assets) ? data.assets : [];
+        const seen = new Set();
+        const deduped = [];
+        for (const asset of raw) {
+          const url = asset?.url;
+          if (!url || seen.has(url)) continue;
+          seen.add(url);
+          deduped.push(asset);
+        }
+        deduped.sort((a, b) => {
+          const ap = a.projectId === activeProjectId ? 1 : 0;
+          const bp = b.projectId === activeProjectId ? 1 : 0;
+          if (ap !== bp) return bp - ap;
+          return 0;
+        });
+        setPickerAssets(deduped);
+      })
+      .catch((e) => {
+        if (!cancelled) showToast(e.message || "Could not load image library");
+      })
+      .finally(() => {
+        if (!cancelled) setPickerLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [imagePicker, activeProjectId]);
+
+  async function storeImageAsset(file, kind, loadingKey = "") {
     if (!file) return "";
     if (!activeProjectId) {
       showToast("Create or load a project before selecting images");
       return "";
     }
-    const dataUrl = await fileToDataUrl(file);
-    const result = await postJson(fnUrl("/uploadAsset"), { projectId: activeProjectId, kind, fileName: file.name, dataUrl });
-    if (!result?.url) throw new Error("Could not save image");
-    return result.url;
+    if (loadingKey) setUploadLoading((prev) => ({ ...prev, [loadingKey]: true }));
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const result = await postJson(fnUrl("/uploadAsset"), { projectId: activeProjectId, kind, fileName: file.name, dataUrl });
+      if (!result?.url) throw new Error("Could not save image");
+      return result.url;
+    } finally {
+      if (loadingKey) setUploadLoading((prev) => ({ ...prev, [loadingKey]: false }));
+    }
+  }
+
+  function mergeClientRowsWithDefaults(nextRows, defaults = assetDefaults) {
+    if (!defaults?.firstSlideImageUrl) return nextRows;
+    return nextRows.map((row) => {
+      if (row?.firstSlideImage) return row;
+      return { ...row, firstSlideImage: defaults.firstSlideImageUrl, firstSlideImageName: row.firstSlideImageName || "default" };
+    });
+  }
+
+  function mergeClientConfigWithDefaults(nextConfig, defaults = assetDefaults) {
+    const next = { ...nextConfig };
+    if (!next.bgDataUrl && defaults?.backgroundUrl) next.bgDataUrl = defaults.backgroundUrl;
+    if (!next.logoDataUrl && defaults?.logoUrl) next.logoDataUrl = defaults.logoUrl;
+    if (!next.lastLogoDataUrl && defaults?.lastSlideLogoUrl) next.lastLogoDataUrl = defaults.lastSlideLogoUrl;
+    return next;
+  }
+
+  function handleOpenImagePicker(payload) {
+    if (!activeProjectId) {
+      showToast("Create or load a project first");
+      return;
+    }
+    setImagePicker(payload);
+  }
+
+  async function handlePickerUpload(file) {
+    if (!file || !imagePicker) return;
+    try {
+      const url = await storeImageAsset(file, imagePicker.kind, `picker:${imagePicker.kind}`);
+      if (!url) return;
+      await imagePicker.applyUrl(url, file.name);
+      if (pickerUploadRef.current) pickerUploadRef.current.value = "";
+      setImagePicker(null);
+      showToast("Image saved");
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+
+  async function handleSetDefaultAsset(assetId) {
+    if (!assetId) return;
+    setBusyDefaultAssetId(String(assetId));
+    try {
+      const data = await postJson(fnUrl("/setDefaultAsset"), { assetId });
+      if (data?.assetDefaults) setAssetDefaults(data.assetDefaults);
+      if (data?.projects) {
+        setProjects(data.projects);
+        if (activeProjectId && data.projects[activeProjectId]) {
+          applyProject(data.projects[activeProjectId], { setConfig, setRows, setGenerated, setVisible });
+        }
+      }
+      showToast("Default image updated for all projects");
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      setBusyDefaultAssetId("");
+    }
   }
 
   async function setConfigImage(key, kind, file) {
     try {
-      const url = await storeImageAsset(file, kind);
+      const url = await storeImageAsset(file, kind, `sidebar:${kind}`);
       if (url) updateConfig({ [key]: url });
     } catch (error) {
       showToast(error.message);
@@ -445,11 +550,12 @@ function App() {
   async function setFirstSlideImage(index, file) {
     if (!file) return;
     try {
-      const url = await storeImageAsset(file, `first-slide-${index + 1}`);
+      const url = await storeImageAsset(file, `first-slide-${index + 1}`, `card:first-slide:${index}`);
       if (!url) return;
       const nextRows = rows.map((row, i) => i === index ? { ...row, firstSlideImage: url, firstSlideImageName: file.name } : row);
-      setRows(nextRows);
-      setGenerated((prev) => ({ ...prev, [index]: { ...prev[index], rowData: nextRows[index], slides: slidesFor(nextRows[index], config) } }));
+      const merged = mergeClientRowsWithDefaults(nextRows);
+      setRows(merged);
+      setGenerated((prev) => ({ ...prev, [index]: { ...prev[index], rowData: merged[index], slides: slidesFor(merged[index], config) } }));
       showToast("First slide image saved to Firebase Storage");
     } catch (error) {
       showToast(error.message);
@@ -541,24 +647,123 @@ function App() {
           <div className="tpls"><button onClick={() => downloadTemplate("single")}>Single Template</button><button onClick={() => downloadTemplate("carousel")}>Carousel Template</button></div>
         </Panel>
         <Panel title="Progress"><div className="stats"><Stat label="Total" value={stats.total} /><Stat label="Done" value={stats.done} /><Stat label="Pending" value={stats.pending} /><Stat label="Error" value={0} /></div><div className="bar"><span style={{ width: `${stats.total ? stats.done / stats.total * 100 : 0}%` }} /></div></Panel>
-        <Panel title="Background"><ImageBox label="Background image" value={config.bgDataUrl} onFile={(file) => setConfigImage("bgDataUrl", "background", file)} onClear={() => updateConfig({ bgDataUrl: "" })} /><Field label="Fallback Color"><input type="color" value={config.bgColor} onChange={(e) => updateConfig({ bgColor: e.target.value })} /></Field></Panel>
-        <Panel title="Logo"><ImageBox label="Logo" value={config.logoDataUrl} onFile={(file) => setConfigImage("logoDataUrl", "logo", file)} onClear={() => updateConfig({ logoDataUrl: "" })} /><Range label="Logo H" value={config.logoH} min="20" max="200" onChange={(v) => updateConfig({ logoH: v })} /></Panel>
+        <Panel title="Background"><ImageBox label="Background image" value={config.bgDataUrl} busy={!!uploadLoading["sidebar:background"]} onOpen={() => handleOpenImagePicker({
+          title: "Background image",
+          kind: "background",
+          mode: "config",
+          configKey: "bgDataUrl",
+          applyUrl: async (url) => {
+            const next = mergeClientConfigWithDefaults({ ...config, bgDataUrl: url });
+            updateConfig({ bgDataUrl: next.bgDataUrl });
+          },
+        })} onFile={(file) => setConfigImage("bgDataUrl", "background", file)} onClear={() => updateConfig({ bgDataUrl: "" })} /><Field label="Fallback Color"><input type="color" value={config.bgColor} onChange={(e) => updateConfig({ bgColor: e.target.value })} /></Field></Panel>
+        <Panel title="Logo"><ImageBox label="Logo" value={config.logoDataUrl} busy={!!uploadLoading["sidebar:logo"]} onOpen={() => handleOpenImagePicker({
+          title: "Logo",
+          kind: "logo",
+          mode: "config",
+          configKey: "logoDataUrl",
+          applyUrl: async (url) => {
+            const next = mergeClientConfigWithDefaults({ ...config, logoDataUrl: url });
+            updateConfig({ logoDataUrl: next.logoDataUrl });
+          },
+        })} onFile={(file) => setConfigImage("logoDataUrl", "logo", file)} onClear={() => updateConfig({ logoDataUrl: "" })} /><Range label="Logo H" value={config.logoH} min="20" max="200" onChange={(v) => updateConfig({ logoH: v })} /></Panel>
         <Panel title="Domain"><Field label="Domain text (optional)"><input value={config.domain} placeholder="e.g. VIITORCLOUD.COM" onChange={(e) => updateConfig({ domain: e.target.value })} /></Field><Color label="Domain color" value={config.domainColor} onChange={(v) => updateConfig({ domainColor: v })} /><p className="hint">X:80px · bottom:80px</p></Panel>
         <Panel title="Typography"><FontWeight label="Title" font={config.fontTitle} weight={config.wtTitle} onFont={(v) => updateConfig({ fontTitle: v })} onWeight={(v) => updateConfig({ wtTitle: v })} /><FontWeight label="Paragraph" font={config.fontPara} weight={config.wtPara} onFont={(v) => updateConfig({ fontPara: v })} onWeight={(v) => updateConfig({ wtPara: v })} /><FontWeight label="CTA" font={config.fontCta} weight={config.wtCta} onFont={(v) => updateConfig({ fontCta: v })} onWeight={(v) => updateConfig({ wtCta: v })} /></Panel>
         <Panel title="Colors"><GradientColor label="Title Color" enabled={config.titleGrad} solid={config.titleColor} g1={config.titleG1} g2={config.titleG2} onToggle={(v) => updateConfig({ titleGrad: v })} onSolid={(v) => updateConfig({ titleColor: v })} onG1={(v) => updateConfig({ titleG1: v })} onG2={(v) => updateConfig({ titleG2: v })} /><div className="color-grid"><Color label="Paragraph" value={config.paraColor} onChange={(v) => updateConfig({ paraColor: v })} /><Color label="CTA Text" value={config.ctaTxt} onChange={(v) => updateConfig({ ctaTxt: v })} /></div><GradientColor label="CTA Background" enabled={config.ctaGrad} solid={config.ctaBg} g1={config.ctaG1} g2={config.ctaG2} onToggle={(v) => updateConfig({ ctaGrad: v })} onSolid={(v) => updateConfig({ ctaBg: v })} onG1={(v) => updateConfig({ ctaG1: v })} onG2={(v) => updateConfig({ ctaG2: v })} /><label className="toggle-row"><span>Text Highlight BG</span><input type="checkbox" checked={config.highlight} onChange={(e) => updateConfig({ highlight: e.target.checked })} /></label>{config.highlight && <Color label="Highlight Color" value={config.highlightColor} onChange={(v) => updateConfig({ highlightColor: v })} />}</Panel>
         <Panel title="Decorative Bars"><div className="seg"><button className={config.barMode === "stack" ? "active" : ""} onClick={() => updateConfig({ barMode: "stack" })}>Stacked</button><button className={config.barMode === "side" ? "active" : ""} onClick={() => updateConfig({ barMode: "side" })}>Side by Side</button></div>{config.bars.map((bar, i) => <div className="bar-row" key={i}><input type="checkbox" checked={bar.enabled} onChange={(e) => updateBar(i, { enabled: e.target.checked })} /><input type="color" value={bar.color} onChange={(e) => updateBar(i, { color: e.target.value })} /><input type="number" value={bar.height} onChange={(e) => updateBar(i, { height: Number(e.target.value) })} /><input type="number" value={bar.weight} onChange={(e) => updateBar(i, { weight: Number(e.target.value) })} /></div>)}</Panel>
         <Panel title="Alignment"><div className="seg three">{["left", "center", "right"].map((v) => <button key={v} className={config.hAlign === v ? "active" : ""} onClick={() => updateConfig({ hAlign: v })}>{v}</button>)}</div><div className="seg three">{["top", "middle", "bottom"].map((v) => <button key={v} className={config.vAlign === v ? "active" : ""} onClick={() => updateConfig({ vAlign: v })}>{v}</button>)}</div></Panel>
         <Panel title="Sizing & Spacing"><Range label="Title Size" value={config.titleSize} min="28" max="80" onChange={(v) => updateConfig({ titleSize: v })} /><Range label="Para Size" value={config.paraSize} min="14" max="32" onChange={(v) => updateConfig({ paraSize: v })} /><Range label="CTA Size" value={config.ctaSize} min="13" max="32" onChange={(v) => updateConfig({ ctaSize: v })} /><Range label="Content W" value={config.contentWidth} min="200" max="800" onChange={(v) => updateConfig({ contentWidth: v })} /><p className="hint">Max width for title and paragraph</p><Range label="T to P Gap" value={config.gapTP} min="8" max="80" onChange={(v) => updateConfig({ gapTP: v })} /><Range label="P to CTA Gap" value={config.gapPC} min="8" max="80" onChange={(v) => updateConfig({ gapPC: v })} /></Panel>
-        {config.postType === "carousel" && <Panel title="Last Slide Logo"><p className="hint">Override logo specifically for the last carousel slide.</p><ImageBox label="Last slide logo" value={config.lastLogoDataUrl} onFile={(file) => setConfigImage("lastLogoDataUrl", "last-slide-logo", file)} onClear={() => updateConfig({ lastLogoDataUrl: "" })} /><Range label="Logo H" value={config.lastLogoH} min="20" max="200" onChange={(v) => updateConfig({ lastLogoH: v })} /><div className="two"><Field label="X pos"><input type="number" value={config.lastLogoX} min="0" max="700" onChange={(e) => updateConfig({ lastLogoX: Number(e.target.value) })} /></Field><Field label="Y pos"><input type="number" value={config.lastLogoY} min="0" max="900" onChange={(e) => updateConfig({ lastLogoY: Number(e.target.value) })} /></Field></div></Panel>}
+        {config.postType === "carousel" && <Panel title="Last Slide Logo"><p className="hint">Override logo specifically for the last carousel slide.</p><ImageBox label="Last slide logo" value={config.lastLogoDataUrl} busy={!!uploadLoading["sidebar:last-slide-logo"]} onOpen={() => handleOpenImagePicker({
+          title: "Last slide logo",
+          kind: "last-slide-logo",
+          mode: "config",
+          configKey: "lastLogoDataUrl",
+          applyUrl: async (url) => {
+            const next = mergeClientConfigWithDefaults({ ...config, lastLogoDataUrl: url });
+            updateConfig({ lastLogoDataUrl: next.lastLogoDataUrl });
+          },
+        })} onFile={(file) => setConfigImage("lastLogoDataUrl", "last-slide-logo", file)} onClear={() => updateConfig({ lastLogoDataUrl: "" })} /><Range label="Logo H" value={config.lastLogoH} min="20" max="200" onChange={(v) => updateConfig({ lastLogoH: v })} /><div className="two"><Field label="X pos"><input type="number" value={config.lastLogoX} min="0" max="700" onChange={(e) => updateConfig({ lastLogoX: Number(e.target.value) })} /></Field><Field label="Y pos"><input type="number" value={config.lastLogoY} min="0" max="900" onChange={(e) => updateConfig({ lastLogoY: Number(e.target.value) })} /></Field></div></Panel>}
         {config.postType === "carousel" && <Panel title="Carousel Features"><label className="toggle-row"><span>Slide Indicator</span><input type="checkbox" checked={config.indicators} onChange={(e) => updateConfig({ indicators: e.target.checked })} /></label>{config.indicators && <PosGrid value={config.indicatorPos} onChange={(v) => updateConfig({ indicatorPos: v })} includeDefault={false} />}<label className="toggle-row"><span>Slide Numbering <small>(Slides 2-5 only)</small></span><input type="checkbox" checked={config.slideNumbers} onChange={(e) => updateConfig({ slideNumbers: e.target.checked })} /></label><p className="hint">Shows 01, 02, 03, 04 on mid slides</p><Field label="Alignment Scope"><div className="seg three">{["all", "first", "last"].map((v) => <button key={v} className={config.alignScope === v ? "active" : ""} onClick={() => updateConfig({ alignScope: v })}>{v === "all" ? "All Slides" : v === "first" ? "Slide 1" : "CTA Slide"}</button>)}</div></Field>{config.alignScope === "first" && <AlignOverride title="Slide 1 Alignment" h={config.slide1HAlign} v={config.slide1VAlign} onH={(v) => updateConfig({ slide1HAlign: v })} onV={(v) => updateConfig({ slide1VAlign: v })} />}{config.alignScope === "last" && <AlignOverride title="CTA Slide Alignment" h={config.ctaHAlign} v={config.ctaVAlign} onH={(v) => updateConfig({ ctaHAlign: v })} onV={(v) => updateConfig({ ctaVAlign: v })} />}<Field label="CTA Slide Domain Position"><PosGrid value={config.ctaDomainPos} onChange={(v) => updateConfig({ ctaDomainPos: v })} includeDefault /></Field></Panel>}
         <Panel title="Actions"><button className="btn-primary" onClick={generateAll} disabled={!rows.length}>Generate All Posts</button><button className="btn-secondary" onClick={downloadZip} disabled={!Object.keys(generated).length}>Download All as ZIP</button></Panel>
       </aside>
-      <main><div className="main-head"><div><h2>Generated Posts</h2><p>{activeProjectId ? `Project: ${activeProject?.name} · ${rows.length} posts ready` : "No project selected"}</p></div><div className="actions"><button onClick={generateAll} disabled={!rows.length}>Generate All Posts</button><button onClick={downloadZip} disabled={!Object.keys(generated).length}>Download All as ZIP</button></div></div><PostGrid animateSeed={animateSeed} generated={generated} visible={visible} setVisible={setVisible} onDownload={downloadPost} onEdit={(index) => setEditing({ index, row: generated[index].rowData })} onImage={setFirstSlideImage} /></main>
+      <main><div className="main-head"><div><h2>Generated Posts</h2><p>{activeProjectId ? `Project: ${activeProject?.name} · ${rows.length} posts ready` : "No project selected"}</p></div><div className="actions"><button onClick={generateAll} disabled={!rows.length}>Generate All Posts</button><button onClick={downloadZip} disabled={!Object.keys(generated).length}>Download All as ZIP</button></div></div><PostGrid animateSeed={animateSeed} generated={generated} visible={visible} setVisible={setVisible} onDownload={downloadPost} onEdit={(index) => setEditing({ index, row: generated[index].rowData })} uploadLoading={uploadLoading} onOpenFirstSlideImage={(index) => handleOpenImagePicker({
+        title: `First slide image · Post #${index + 1}`,
+        kind: `first-slide-${index + 1}`,
+        mode: "row-first-slide",
+        rowIndex: index,
+        applyUrl: async (url, name) => {
+          const nextRows = rows.map((row, i) => i === index ? { ...row, firstSlideImage: url, firstSlideImageName: name || row.firstSlideImageName } : row);
+          const merged = mergeClientRowsWithDefaults(nextRows);
+          setRows(merged);
+          setGenerated((prev) => ({ ...prev, [index]: { ...prev[index], rowData: merged[index], slides: slidesFor(merged[index], config) } }));
+        },
+      })} onImage={setFirstSlideImage} /></main>
     </div>
     {editing && <EditModal row={editing.row} config={config} onClose={() => setEditing(null)} onSave={applyEdit} />}
     {showNewProjectModal && <NewProjectModal onClose={() => setShowNewProjectModal(false)} onCreate={createNewProject} creating={creatingProject} />}
+    {imagePicker && <AssetPickerModal
+      title={imagePicker.title}
+      projects={projects}
+      assets={pickerAssets}
+      loadingList={pickerLoading}
+      loadingUpload={!!uploadLoading[`picker:${imagePicker.kind}`]}
+      busyAssetId={busyDefaultAssetId}
+      uploadInputRef={pickerUploadRef}
+      onClose={() => setImagePicker(null)}
+      onPick={async (asset) => {
+        if (!asset?.url) return;
+        await imagePicker.applyUrl(asset.url, asset.fileName);
+        setImagePicker(null);
+      }}
+      onUploadClick={() => pickerUploadRef.current?.click()}
+      onUploadFile={(file) => handlePickerUpload(file)}
+      onSetDefault={(assetId) => handleSetDefaultAsset(assetId)}
+    />}
     <div ref={renderRef} className="render-area" />
     {toast && <div className="toast">{toast}</div>}
+  </div>;
+}
+
+function projectNameFromId(projects, projectId) {
+  return projects?.[projectId]?.name || projectId || "";
+}
+
+function AssetPickerModal({ title, projects, assets, loadingList, loadingUpload, busyAssetId, uploadInputRef, onClose, onPick, onUploadClick, onUploadFile, onSetDefault }) {
+  return <div className="modal" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
+    <div className="dialog asset-dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="dialog-head"><h2>{title}</h2><button type="button" onClick={onClose} aria-label="Close image picker">×</button></div>
+      <div className="dialog-body asset-body">
+        <div className="asset-toolbar">
+          <button type="button" className="btn-primary" style={{ marginTop: 0 }} onClick={onUploadClick} disabled={loadingUpload}>{loadingUpload ? "Uploading…" : "Upload new"}</button>
+          <input ref={uploadInputRef} hidden type="file" accept="image/*" onChange={(e) => onUploadFile?.(e.target.files[0])} />
+        </div>
+        {loadingList ? <div className="asset-loading">Loading library…</div> : (
+          <div className="asset-grid">
+            {assets.length ? assets.map((asset) => (
+              <div className="asset-tile" key={asset.id}>
+                <button
+                  type="button"
+                  className="asset-thumb"
+                  style={{ backgroundImage: `url(${asset.url})` }}
+                  onClick={() => onPick(asset)}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onPick(asset))}
+                  tabIndex={0}
+                  aria-label="Use this image"
+                />
+                <div className="asset-meta">
+                  <small>{projectNameFromId(projects, asset.projectId)}</small>
+                  <div className="asset-actions">
+                    <button type="button" onClick={() => onPick(asset)}>Use</button>
+                    <button type="button" disabled={busyAssetId === asset.id} onClick={() => onSetDefault(asset.id)}>{busyAssetId === asset.id ? "Saving…" : "Set as default"}</button>
+                  </div>
+                </div>
+              </div>
+            )) : <div className="asset-empty">No saved images for this type yet. Upload one.</div>}
+          </div>
+        )}
+      </div>
+      <div className="dialog-foot"><button type="button" onClick={onClose}>Close</button></div>
+    </div>
   </div>;
 }
 
@@ -602,16 +807,26 @@ function PosGrid({ value, onChange, includeDefault }) {
 function AlignOverride({ title, h, v, onH, onV }) {
   return <div className="override"><b>{title}</b><span>Horizontal</span><div className="seg three">{["left", "center", "right"].map((x) => <button key={x} className={h === x ? "active" : ""} onClick={() => onH(x)}>{x}</button>)}</div><span>Vertical</span><div className="seg three">{["top", "middle", "bottom"].map((x) => <button key={x} className={v === x ? "active" : ""} onClick={() => onV(x)}>{x}</button>)}</div></div>;
 }
-function ImageBox({ value, onFile, onClear, label }) {
+function ImageBox({ value, onFile, onClear, label, onOpen, busy }) {
+  const fileRef = React.useRef(null);
   const displayUrl = absoluteAssetUrl(value);
-  return <label className={`image-box ${value ? "has-image" : ""}`} style={value ? { backgroundImage: `url(${displayUrl})` } : {}}><input hidden type="file" accept="image/*" onChange={(e) => onFile?.(e.target.files[0])} />{value && <button type="button" onClick={(e) => { e.preventDefault(); onClear?.(); }}>×</button>}<span>{label}</span></label>;
+  return <div className={`image-box-wrap ${busy ? "busy" : ""}`}>
+    <button type="button" className={`image-box ${value ? "has-image" : ""}`} style={value ? { backgroundImage: `url(${displayUrl})` } : {}} onClick={() => onOpen?.()} aria-label={`Choose ${label}`}>
+      {busy && <div className="image-busy" aria-live="polite"><span className="spinner" /></div>}
+      <span>{label}</span>
+    </button>
+    <input ref={fileRef} hidden type="file" accept="image/*" onChange={(e) => onFile?.(e.target.files[0])} />
+    <button type="button" className="image-upload" onClick={() => fileRef.current?.click()} aria-label={`Upload new ${label}`}>↑</button>
+    {value && <button type="button" className="image-clear" onClick={(e) => { e.preventDefault(); onClear?.(); }} aria-label={`Clear ${label}`}>×</button>}
+  </div>;
 }
-function PostGrid({ generated, visible, setVisible, onDownload, onEdit, onImage, animateSeed }) {
+function PostGrid({ generated, visible, setVisible, onDownload, onEdit, onImage, onOpenFirstSlideImage, animateSeed, uploadLoading }) {
   const entries = Object.entries(generated);
   if (!entries.length) return <div className="empty"><div>✦</div><h3>Upload an Excel file and generate posts</h3><p>Your rendered cards will appear here.</p></div>;
   return <div className="posts-grid" data-anim={animateSeed}>{entries.map(([idx, post], i) => {
     const current = visible[idx] || 0;
-    return <article className="post-card anim-in" style={{ "--stagger": `${Math.min(i, 18) * 45}ms` }} key={idx}><div className="card-head"><span>{post.type}</span><small>#{Number(idx) + 1} · {(post.rowData.title || post.rowData.slide1_title || "Untitled").slice(0, 24)}</small></div><div className="status">● Ready</div><Preview html={post.slides[current]} />{post.slides.length > 1 && <div className="dots">{post.slides.map((_, i) => <button key={i} className={i === current ? "active" : ""} onClick={() => setVisible((prev) => ({ ...prev, [idx]: i }))} />)}</div>}<div className="card-actions"><button onClick={() => onEdit(idx)}>✎ Edit</button>{post.type === "carousel" && current === 0 && <label className="img-btn"><input hidden type="file" accept="image/*" onChange={(e) => onImage(Number(idx), e.target.files[0])} />{post.rowData.firstSlideImage ? "✓ Image" : "▣ Image"}</label>}<button onClick={() => onDownload(idx)}>⬇ PNG</button></div></article>;
+    const busyFirst = !!uploadLoading?.[`card:first-slide:${idx}`];
+    return <article className="post-card anim-in" style={{ "--stagger": `${Math.min(i, 18) * 45}ms` }} key={idx}><div className="card-head"><span>{post.type}</span><small>#{Number(idx) + 1} · {(post.rowData.title || post.rowData.slide1_title || "Untitled").slice(0, 24)}</small></div><div className="status">● Ready</div><Preview html={post.slides[current]} />{post.slides.length > 1 && <div className="dots">{post.slides.map((_, i) => <button key={i} className={i === current ? "active" : ""} onClick={() => setVisible((prev) => ({ ...prev, [idx]: i }))} />)}</div>}<div className="card-actions"><button onClick={() => onEdit(idx)}>✎ Edit</button>{post.type === "carousel" && current === 0 && <><button type="button" className={`img-btn ${busyFirst ? "busy" : ""}`} onClick={() => onOpenFirstSlideImage?.(Number(idx))} aria-busy={busyFirst} aria-label="Choose first slide image">{busyFirst ? "…" : (post.rowData.firstSlideImage ? "✓ Image" : "▣ Image")}</button></>}<button onClick={() => onDownload(idx)}>⬇ PNG</button></div></article>;
   })}</div>;
 }
 function Preview({ html }) {

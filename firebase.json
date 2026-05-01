@@ -1,4 +1,8 @@
 {
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
   "hosting": {
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
@@ -8,6 +12,8 @@
       { "source": "/saveProject", "function": { "functionId": "saveProject", "region": "us-central1" } },
       { "source": "/deleteProject", "function": { "functionId": "deleteProject", "region": "us-central1" } },
       { "source": "/uploadAsset", "function": { "functionId": "uploadAsset", "region": "us-central1" } },
+      { "source": "/listAssets", "function": { "functionId": "listAssets", "region": "us-central1" } },
+      { "source": "/setDefaultAsset", "function": { "functionId": "setDefaultAsset", "region": "us-central1" } },
       { "source": "**", "destination": "/index.html" }
     ]
   },

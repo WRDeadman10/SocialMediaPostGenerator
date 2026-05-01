@@ -4,5 +4,11 @@ service cloud.firestore {
     match /projects/{projectId} {
       allow read, write: if true; // TODO: add Firebase Auth rules before going public
     }
+    match /assetLibrary/{assetId} {
+      allow read, write: if true; // TODO: add Firebase Auth rules before going public
+    }
+    match /settings/{docId} {
+      allow read, write: if true; // TODO: add Firebase Auth rules before going public
+    }
   }
 }
