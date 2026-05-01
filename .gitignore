@@ -25,3 +25,12 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# ── Aider / Bridge artefacts ─────────────────────────────────────
+taskJsons/                              
+.aider.tags.cache.v4/                   
+bridge_progress/                       
+logs.meta                               
+.aider.input.history                    
+.aider.chat.history.md                   
+bridge_progress.meta                     
