@@ -1,0 +1,9 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /projects/{projectId}/assets/{fileName} {
+      allow read: if true;
+      allow write: if true; // TODO: add Firebase Auth rules before going public
+    }
+  }
+}
