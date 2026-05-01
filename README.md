@@ -7,7 +7,10 @@ Generate branded single-post and carousel images from Excel data. Built with Rea
 - Create named projects, then load Excel files into them
 - Re-uploading Excel to the same project updates rows — no duplicate projects
 - Generate single posts or 6-slide carousels with live preview
-- Upload background, logo, and per-row first-slide images (stored in Firebase Storage)
+- Upload background, logo, last-slide logo, and per-row first-slide images (Firebase Storage)
+- **Asset library modal:** paginated inventory (10 per page), default preview in the header, low-res thumbnails in the grid, full-resolution preview on hover/focus, “Upload new” as the first card
+- **Storage layout (new uploads):** images are stored under typed folders per project — `assets/logo/`, `assets/background/`, `assets/last-slide-logo/`, `assets/first-slide-image/` (legacy flat `assets/` files are still listed)
+- Client-generated **JPEG thumbnails** on upload; listings prefer `thumbUrl` when present
 - Edit post content and alignment inline
 - Smooth UI animations + “card deal” animation when posts populate (with subtle SFX)
 - Download individual posts or all as ZIP
@@ -26,15 +29,31 @@ Generate branded single-post and carousel images from Excel data. Built with Rea
 
 ```
 ├── src/
-│   └── main.jsx          # React app (single file)
+│   ├── main.jsx                 # App bootstrap (root + styles)
+│   ├── app/App.jsx              # Shell: state, hooks, layout
+│   ├── components/              # UI (sidebar, grid, modals, preview)
+│   ├── hooks/                   # useImagePipeline, usePostGeneration, persistence, etc.
+│   └── lib/                     # API helpers, slide HTML, constants, asset defaults
 ├── functions/
-│   └── index.js          # Cloud Functions: getProjects, createProject, saveProject, uploadAsset
-├── firebase.json         # Hosting + Functions config
-├── firestore.rules       # Firestore security rules
-├── storage.rules         # Storage security rules
+│   └── index.js                 # Cloud Functions (see below)
+├── firebase.json                # Hosting + Functions rewrites
+├── firestore.rules
+├── storage.rules
 ├── vite.config.js
-└── .env.example          # Required environment variables
+└── .env.example                 # Environment variables
 ```
+
+### Cloud Functions (HTTP)
+
+| Endpoint | Purpose |
+|---|---|
+| `getProjects` | Load all projects + merged `assetDefaults` |
+| `createProject` | Create project document |
+| `saveProject` | Persist project (posts stripped) |
+| `deleteProject` | Remove project |
+| `uploadAsset` | Save image under typed folder + optional thumbnail; writes `assetLibrary` |
+| `listAssets` | List assets by kind (Firestore + Storage), pagination (`page`, `pageSize`), thumb URLs |
+| `setDefaultAsset` | Set global default from library id or `{ defaultFromUrl }` |
 
 ## Setup
 
@@ -114,13 +133,20 @@ firebase deploy --only firestore:rules,storage:rules
 npm run deploy
 ```
 
+After changing Storage paths or asset APIs, redeploy functions:
+
+```bash
+firebase deploy --only functions
+```
+
 ## Usage
 
 1. Click **+ New Project** and enter a project name
 2. Upload an Excel file into the project
 3. Configure theme, colors, fonts, and branding in the sidebar
-4. Click **Generate All Posts**
-5. Download individual PNGs or all as ZIP
+4. Use image pickers (background, logo, etc.) to choose from the library or upload new assets
+5. Click **Generate All Posts**
+6. Download individual PNGs or all as ZIP
 
 ## Troubleshooting
 
@@ -129,7 +155,7 @@ npm run deploy
 If browser shows CORS preflight error like:
 - `No 'Access-Control-Allow-Origin' header`
 
-Recommended fix: route function calls through **Firebase Hosting rewrites** (same origin). Ensure `firebase.json` has rewrites for endpoints like `/uploadAsset`, then deploy:
+Recommended fix: route function calls through **Firebase Hosting rewrites** (same origin). Ensure `firebase.json` has rewrites for endpoints like `/uploadAsset`, `/listAssets`, then deploy:
 
 ```bash
 firebase deploy --only functions,hosting
@@ -148,6 +174,10 @@ If you must debug cross-origin calls anyway, set `VITE_FORCE_CROSS_ORIGIN_FUNCTI
 Gen2 HTTP functions run on Cloud Run. If Hosting rewrite hits the service but IAM blocks public access, you get **403**.
 
 This repo sets `invoker: "public"` on the HTTP functions so deploy should grant unauthenticated invoke. If you still see 403 after deploy, open the function in Firebase console → **Cloud Run service** → **Security** → ensure **Allow unauthenticated invocations** is enabled (equivalent to `roles/run.invoker` for `allUsers`).
+
+### Asset modal shows no files but objects exist in Storage
+
+Older files may live directly under `projects/{id}/assets/` (flat). The app still lists those. New uploads go under typed subfolders. Firestore `assetLibrary` entries are created when uploads go through `uploadAsset`; bucket-only files are merged into `listAssets` by scanning Storage.
 
 ### Excel format
 
