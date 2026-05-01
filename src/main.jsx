@@ -57,12 +57,18 @@ function absoluteAssetUrl(value) {
 }
 function applyProject(project, setters) {
   const nextConfig = { ...defaultConfig, ...(project?.config || {}) };
-  const nextPosts = Object.fromEntries(Object.entries(project?.posts || {}).map(([idx, post]) => {
-    const row = post.rowData || project?.rows?.[idx] || {};
+  const nextRows = project?.rows || [];
+  const savedPosts = project?.posts && Object.keys(project.posts).length ? project.posts : null;
+  const seedPosts = savedPosts || Object.fromEntries(nextRows.map((row, idx) => ([
+    String(idx),
+    { type: (row.post_type || "single").toLowerCase().trim(), rowData: row, slides: [] },
+  ])));
+  const nextPosts = Object.fromEntries(Object.entries(seedPosts).map(([idx, post]) => {
+    const row = post?.rowData || nextRows[Number(idx)] || {};
     return [idx, { ...post, rowData: row, slides: slidesFor(row, nextConfig) }];
   }));
   setters.setConfig(nextConfig);
-  setters.setRows(project?.rows || []);
+  setters.setRows(nextRows);
   setters.setGenerated(nextPosts);
   setters.setVisible(project?.visible || {});
 }
@@ -156,7 +162,10 @@ function App() {
   const [toast, setToast] = React.useState("");
   const [showNewProjectModal, setShowNewProjectModal] = React.useState(false);
   const [creatingProject, setCreatingProject] = React.useState(false);
+  const [animateSeed, setAnimateSeed] = React.useState(0);
   const renderRef = React.useRef(null);
+  const lastGeneratedCountRef = React.useRef(0);
+  const audioCtxRef = React.useRef(null);
 
   React.useEffect(() => {
     document.documentElement.dataset.theme = config.theme;
@@ -223,6 +232,52 @@ function App() {
   function updateBar(index, patch) {
     setConfig((prev) => ({ ...prev, bars: prev.bars.map((bar, i) => i === index ? { ...bar, ...patch } : bar) }));
   }
+
+  const playSfx = React.useCallback((type) => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") ctx.resume().catch(() => {});
+
+      const now = ctx.currentTime;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0.0001, now);
+      master.gain.exponentialRampToValueAtTime(0.08, now + 0.01);
+      master.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+      master.connect(ctx.destination);
+
+      const o1 = ctx.createOscillator();
+      const o2 = ctx.createOscillator();
+      o1.type = "triangle";
+      o2.type = "sine";
+
+      const base = type === "apply" ? 220 : type === "generate" ? 196 : 174;
+      o1.frequency.setValueAtTime(base * 2.0, now);
+      o1.frequency.exponentialRampToValueAtTime(base * 2.8, now + 0.12);
+      o2.frequency.setValueAtTime(base * 3.2, now);
+      o2.frequency.exponentialRampToValueAtTime(base * 2.4, now + 0.16);
+
+      const g1 = ctx.createGain();
+      const g2 = ctx.createGain();
+      g1.gain.value = 0.55;
+      g2.gain.value = 0.35;
+      o1.connect(g1);
+      o2.connect(g2);
+      g1.connect(master);
+      g2.connect(master);
+
+      o1.start(now);
+      o2.start(now);
+      o1.stop(now + 0.24);
+      o2.stop(now + 0.24);
+    } catch {
+      // Ignore audio failures (autoplay policy, unsupported, etc.)
+    }
+  }, []);
 
   async function createNewProject(name) {
     if (!name?.trim()) return;
@@ -300,6 +355,8 @@ function App() {
       next[i] = { type: (row.post_type || "single").toLowerCase().trim(), rowData: row, slides: slidesFor(row, config) };
     });
     setGenerated(next);
+    setAnimateSeed(Date.now());
+    playSfx("generate");
     showToast(`${rows.length} posts generated`);
   }
   function regenerateGenerated(nextRows = rows, nextConfig = config) {
@@ -313,6 +370,34 @@ function App() {
     return () => clearTimeout(id);
   }, [config]);
 
+  async function postJson(url, body) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const text = await response.text();
+      let parsed = null;
+      try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
+      if (!response.ok) {
+        const message = parsed?.error || `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+      return parsed;
+    } catch (error) {
+      const isNetwork = error instanceof TypeError && String(error.message || "").toLowerCase().includes("fetch");
+      if (!isNetwork) throw error;
+      const hint =
+        FUNCTIONS_URL.includes("socialmediapostgenerator-007")
+          ? "Set VITE_FUNCTIONS_URL (project id) in .env.local"
+          : (window.location.protocol === "https:" && FUNCTIONS_URL.startsWith("http:"))
+            ? "Your app is HTTPS but VITE_FUNCTIONS_URL is HTTP (mixed content). Use HTTPS Cloud Functions URL."
+            : "If using emulators, run `npm run emulate` and ensure VITE_FUNCTIONS_URL matches emulator project id.";
+      throw new Error(`Failed to fetch. ${hint}`);
+    }
+  }
+
   async function storeImageAsset(file, kind) {
     if (!file) return "";
     if (!activeProjectId) {
@@ -320,13 +405,8 @@ function App() {
       return "";
     }
     const dataUrl = await fileToDataUrl(file);
-    const response = await fetch(`${FUNCTIONS_URL}/uploadAsset`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId: activeProjectId, kind, fileName: file.name, dataUrl }),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Could not save image");
+    const result = await postJson(`${FUNCTIONS_URL}/uploadAsset`, { projectId: activeProjectId, kind, fileName: file.name, dataUrl });
+    if (!result?.url) throw new Error("Could not save image");
     return result.url;
   }
 
@@ -390,9 +470,22 @@ function App() {
     setConfig(modalConfig);
     setGenerated((prev) => ({ ...prev, [editing.index]: { ...prev[editing.index], rowData: row, slides: slidesFor(row, modalConfig) } }));
     setEditing(null);
+    setAnimateSeed(Date.now());
+    playSfx("apply");
   }
   const stats = { total: rows.length, done: Object.keys(generated).length, pending: Math.max(rows.length - Object.keys(generated).length, 0) };
   const activeProject = projects[activeProjectId];
+
+  React.useEffect(() => {
+    const count = Object.keys(generated).length;
+    const prev = lastGeneratedCountRef.current;
+    lastGeneratedCountRef.current = count;
+    if (!hydrated) return;
+    if (count && count !== prev) {
+      setAnimateSeed(Date.now());
+      playSfx("distribute");
+    }
+  }, [generated, hydrated, playSfx]);
 
   return <div className="shell">
     <header><div className="brand"><div className="brand-icon">✦</div><div><b>Post Generator</b><span>VIITORCLOUD</span></div></div><button className="theme-btn" onClick={() => updateConfig({ theme: config.theme === "dark" ? "light" : "dark" })}>{config.theme === "dark" ? "☀" : "☾"}</button></header>
@@ -436,7 +529,7 @@ function App() {
         {config.postType === "carousel" && <Panel title="Carousel Features"><label className="toggle-row"><span>Slide Indicator</span><input type="checkbox" checked={config.indicators} onChange={(e) => updateConfig({ indicators: e.target.checked })} /></label>{config.indicators && <PosGrid value={config.indicatorPos} onChange={(v) => updateConfig({ indicatorPos: v })} includeDefault={false} />}<label className="toggle-row"><span>Slide Numbering <small>(Slides 2-5 only)</small></span><input type="checkbox" checked={config.slideNumbers} onChange={(e) => updateConfig({ slideNumbers: e.target.checked })} /></label><p className="hint">Shows 01, 02, 03, 04 on mid slides</p><Field label="Alignment Scope"><div className="seg three">{["all", "first", "last"].map((v) => <button key={v} className={config.alignScope === v ? "active" : ""} onClick={() => updateConfig({ alignScope: v })}>{v === "all" ? "All Slides" : v === "first" ? "Slide 1" : "CTA Slide"}</button>)}</div></Field>{config.alignScope === "first" && <AlignOverride title="Slide 1 Alignment" h={config.slide1HAlign} v={config.slide1VAlign} onH={(v) => updateConfig({ slide1HAlign: v })} onV={(v) => updateConfig({ slide1VAlign: v })} />}{config.alignScope === "last" && <AlignOverride title="CTA Slide Alignment" h={config.ctaHAlign} v={config.ctaVAlign} onH={(v) => updateConfig({ ctaHAlign: v })} onV={(v) => updateConfig({ ctaVAlign: v })} />}<Field label="CTA Slide Domain Position"><PosGrid value={config.ctaDomainPos} onChange={(v) => updateConfig({ ctaDomainPos: v })} includeDefault /></Field></Panel>}
         <Panel title="Actions"><button className="btn-primary" onClick={generateAll} disabled={!rows.length}>Generate All Posts</button><button className="btn-secondary" onClick={downloadZip} disabled={!Object.keys(generated).length}>Download All as ZIP</button></Panel>
       </aside>
-      <main><div className="main-head"><div><h2>Generated Posts</h2><p>{activeProjectId ? `Project: ${activeProject?.name} · ${rows.length} posts ready` : "No project selected"}</p></div><div className="actions"><button onClick={generateAll} disabled={!rows.length}>Generate All Posts</button><button onClick={downloadZip} disabled={!Object.keys(generated).length}>Download All as ZIP</button></div></div><PostGrid generated={generated} visible={visible} setVisible={setVisible} onDownload={downloadPost} onEdit={(index) => setEditing({ index, row: generated[index].rowData })} onImage={setFirstSlideImage} /></main>
+      <main><div className="main-head"><div><h2>Generated Posts</h2><p>{activeProjectId ? `Project: ${activeProject?.name} · ${rows.length} posts ready` : "No project selected"}</p></div><div className="actions"><button onClick={generateAll} disabled={!rows.length}>Generate All Posts</button><button onClick={downloadZip} disabled={!Object.keys(generated).length}>Download All as ZIP</button></div></div><PostGrid animateSeed={animateSeed} generated={generated} visible={visible} setVisible={setVisible} onDownload={downloadPost} onEdit={(index) => setEditing({ index, row: generated[index].rowData })} onImage={setFirstSlideImage} /></main>
     </div>
     {editing && <EditModal row={editing.row} config={config} onClose={() => setEditing(null)} onSave={applyEdit} />}
     {showNewProjectModal && <NewProjectModal onClose={() => setShowNewProjectModal(false)} onCreate={createNewProject} creating={creatingProject} />}
@@ -489,12 +582,12 @@ function ImageBox({ value, onFile, onClear, label }) {
   const displayUrl = absoluteAssetUrl(value);
   return <label className={`image-box ${value ? "has-image" : ""}`} style={value ? { backgroundImage: `url(${displayUrl})` } : {}}><input hidden type="file" accept="image/*" onChange={(e) => onFile?.(e.target.files[0])} />{value && <button type="button" onClick={(e) => { e.preventDefault(); onClear?.(); }}>×</button>}<span>{label}</span></label>;
 }
-function PostGrid({ generated, visible, setVisible, onDownload, onEdit, onImage }) {
+function PostGrid({ generated, visible, setVisible, onDownload, onEdit, onImage, animateSeed }) {
   const entries = Object.entries(generated);
   if (!entries.length) return <div className="empty"><div>✦</div><h3>Upload an Excel file and generate posts</h3><p>Your rendered cards will appear here.</p></div>;
-  return <div className="posts-grid">{entries.map(([idx, post]) => {
+  return <div className="posts-grid" data-anim={animateSeed}>{entries.map(([idx, post], i) => {
     const current = visible[idx] || 0;
-    return <article className="post-card" key={idx}><div className="card-head"><span>{post.type}</span><small>#{Number(idx) + 1} · {(post.rowData.title || post.rowData.slide1_title || "Untitled").slice(0, 24)}</small></div><div className="status">● Ready</div><Preview html={post.slides[current]} />{post.slides.length > 1 && <div className="dots">{post.slides.map((_, i) => <button key={i} className={i === current ? "active" : ""} onClick={() => setVisible((prev) => ({ ...prev, [idx]: i }))} />)}</div>}<div className="card-actions"><button onClick={() => onEdit(idx)}>✎ Edit</button>{post.type === "carousel" && current === 0 && <label className="img-btn"><input hidden type="file" accept="image/*" onChange={(e) => onImage(Number(idx), e.target.files[0])} />{post.rowData.firstSlideImage ? "✓ Image" : "▣ Image"}</label>}<button onClick={() => onDownload(idx)}>⬇ PNG</button></div></article>;
+    return <article className="post-card anim-in" style={{ "--stagger": `${Math.min(i, 18) * 45}ms` }} key={idx}><div className="card-head"><span>{post.type}</span><small>#{Number(idx) + 1} · {(post.rowData.title || post.rowData.slide1_title || "Untitled").slice(0, 24)}</small></div><div className="status">● Ready</div><Preview html={post.slides[current]} />{post.slides.length > 1 && <div className="dots">{post.slides.map((_, i) => <button key={i} className={i === current ? "active" : ""} onClick={() => setVisible((prev) => ({ ...prev, [idx]: i }))} />)}</div>}<div className="card-actions"><button onClick={() => onEdit(idx)}>✎ Edit</button>{post.type === "carousel" && current === 0 && <label className="img-btn"><input hidden type="file" accept="image/*" onChange={(e) => onImage(Number(idx), e.target.files[0])} />{post.rowData.firstSlideImage ? "✓ Image" : "▣ Image"}</label>}<button onClick={() => onDownload(idx)}>⬇ PNG</button></div></article>;
   })}</div>;
 }
 function Preview({ html }) {

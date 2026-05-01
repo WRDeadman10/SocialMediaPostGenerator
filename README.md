@@ -9,6 +9,7 @@ Generate branded single-post and carousel images from Excel data. Built with Rea
 - Generate single posts or 6-slide carousels with live preview
 - Upload background, logo, and per-row first-slide images (stored in Firebase Storage)
 - Edit post content and alignment inline
+- Smooth UI animations + “card deal” animation when posts populate (with subtle SFX)
 - Download individual posts or all as ZIP
 
 ## Tech Stack
@@ -75,7 +76,7 @@ Edit `.firebaserc`:
 ```json
 {
   "projects": {
-    "default": "YOUR_PROJECT_ID"
+    "default": "socialmediapostgenerator-007"
   }
 }
 ```
@@ -116,6 +117,19 @@ npm run deploy
 3. Configure theme, colors, fonts, and branding in the sidebar
 4. Click **Generate All Posts**
 5. Download individual PNGs or all as ZIP
+
+## Troubleshooting
+
+### Image upload fails with CORS / preflight error
+
+If browser shows CORS preflight error like:
+- `No 'Access-Control-Allow-Origin' header`
+
+Make sure Cloud Functions deployed include CORS enabled (Gen 2 `onRequest({ cors: true })`) and redeploy:
+
+```bash
+firebase deploy --only functions
+```
 
 ### Excel format
 
