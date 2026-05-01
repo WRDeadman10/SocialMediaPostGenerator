@@ -10,12 +10,17 @@ import { usePostGeneration } from "../hooks/usePostGeneration.js";
 import { useProjectActions } from "../hooks/useProjectActions.js";
 import { useProjectPersistence } from "../hooks/useProjectPersistence.js";
 import { useSfx } from "../hooks/useSfx.js";
-import { AppSidebar } from "../components/layout/AppSidebar.jsx";
-import { PostGrid } from "../components/PostGrid.jsx";
+import { AppShell } from "../components/layout/AppShell.jsx";
+import { ConfigWorkspace } from "../components/config/ConfigWorkspace.jsx";
+import { OutputPanel } from "../components/output/OutputPanel.jsx";
+import { CanvasEditor } from "../components/canvas/CanvasEditor.jsx";
+import { InlineTextEditor } from "../components/canvas/InlineTextEditor.jsx";
+import { TopStepper } from "../components/workflow/TopStepper.jsx";
 import { AssetPickerModal } from "../components/modals/AssetPickerModal.jsx";
 import { EditModal } from "../components/modals/EditModal.jsx";
 import { NewProjectModal } from "../components/modals/NewProjectModal.jsx";
 import { FirstRunChecklist } from "../components/FirstRunChecklist.jsx";
+import { getWizardStatus } from "../lib/validation.js";
 
 export const App = () => {
   const [config, setConfig] = React.useState(defaultConfig);
@@ -37,6 +42,12 @@ export const App = () => {
   const [genProgress, setGenProgress] = React.useState({ current: 0, total: 0 });
   const [exportBaseName, setExportBaseName] = React.useState("social_post");
   const [exportZipName, setExportZipName] = React.useState("social_posts");
+  const [exportFormat, setExportFormat] = React.useState("png");
+  const [activePostIndex, setActivePostIndex] = React.useState(null);
+  const [activeSlideIndex, setActiveSlideIndex] = React.useState(0);
+  const [inlineSelection, setInlineSelection] = React.useState(null);
+  const [inlineDraft, setInlineDraft] = React.useState("");
+  const [wizardStep, setWizardStep] = React.useState("upload");
   const renderRef = React.useRef(null);
   const toastTimerRef = React.useRef(null);
 
@@ -180,6 +191,30 @@ export const App = () => {
   }), [generated, rows.length]);
 
   const activeProject = projects[activeProjectId];
+  const activePost = React.useMemo(() => {
+    if (activePostIndex == null) return null;
+    return generated[String(activePostIndex)] || null;
+  }, [activePostIndex, generated]);
+
+  React.useEffect(() => {
+    // When a project loads (or Excel is already loaded) and we already have generated posts,
+    // default to Post 1 / Slide 1 so the canvas isn't empty.
+    const keys = Object.keys(generated || {});
+    if (!keys.length) return;
+    const firstIndex = Math.min(...keys.map((k) => Number(k)).filter((n) => Number.isFinite(n)));
+    if (!Number.isFinite(firstIndex)) return;
+
+    setActivePostIndex((prev) => {
+      if (prev == null) return firstIndex;
+      if (!generated[String(prev)]) return firstIndex;
+      return prev;
+    });
+  }, [generated]);
+
+  React.useEffect(() => {
+    setActiveSlideIndex(0);
+    setInlineSelection(null);
+  }, [activePostIndex]);
 
   const hasBranding = React.useMemo(() => (
     !!(config.bgDataUrl && String(config.bgDataUrl).trim() && config.logoDataUrl && String(config.logoDataUrl).trim())
@@ -245,114 +280,207 @@ export const App = () => {
     showToast({ message: "Cleared branding image overrides for this project", tone: "info" });
   }, [showToast, updateConfig]);
 
+  const wizard = React.useMemo(() => getWizardStatus({
+    activeProjectId,
+    rows,
+    config,
+    generated,
+  }), [activeProjectId, config, generated, rows]);
+
+  React.useEffect(() => {
+    setWizardStep(wizard.currentStepId);
+  }, [wizard.currentStepId]);
+
+  const handleInlineEditRequest = React.useCallback((selection) => {
+    if (!selection) return;
+    setInlineSelection(selection);
+    setInlineDraft(selection.currentValue || "");
+  }, []);
+
+  const commitInlineEdit = React.useCallback(() => {
+    if (!inlineSelection) return;
+    const nextValue = inlineDraft;
+    if (inlineSelection.kind === "config") {
+      updateConfig({ [inlineSelection.field]: nextValue });
+      showToast({ message: "Updated config", tone: "success" });
+      setInlineSelection(null);
+      return;
+    }
+    if (inlineSelection.kind === "row") {
+      const idx = inlineSelection.postIndex;
+      if (idx == null) return;
+      setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [inlineSelection.field]: nextValue } : r)));
+      setGenerated((prev) => {
+        const existing = prev[idx];
+        if (!existing) return prev;
+        const row = { ...(existing.rowData || {}), [inlineSelection.field]: nextValue };
+        return {
+          ...prev,
+          [idx]: { ...existing, rowData: row, slides: slidesFor(row, config) },
+        };
+      });
+      showToast({ message: "Updated text", tone: "success" });
+      setInlineSelection(null);
+    }
+  }, [config, inlineDraft, inlineSelection, setGenerated, setRows, showToast, updateConfig]);
+
+  const handleCanvasOpenEdit = React.useCallback(() => {
+    if (activePostIndex == null) return;
+    const row = rows[activePostIndex];
+    if (!row) return;
+    setEditing({ index: activePostIndex, row: mergeClientRowsWithDefaults([row])[0] });
+  }, [activePostIndex, mergeClientRowsWithDefaults, rows]);
+
+  const handleCanvasOpenFirstSlideImage = React.useCallback(() => {
+    if (activePostIndex == null) return;
+    if (String(config.postType || "").toLowerCase().trim() !== "carousel") return;
+
+    handleOpenImagePicker({
+      title: "First slide image",
+      kind: `first-slide-${activePostIndex + 1}`,
+      mode: "row",
+      applyUrl: async (url, fileName) => {
+        const nextRows = rows.map((row, i) => (
+          i === activePostIndex
+            ? { ...row, firstSlideImage: url, firstSlideImageName: fileName || row.firstSlideImageName || "image" }
+            : row
+        ));
+        const merged = mergeClientRowsWithDefaults(nextRows);
+        setRows(merged);
+        setGenerated((prev) => ({
+          ...prev,
+          [activePostIndex]: { ...prev[activePostIndex], rowData: merged[activePostIndex], slides: slidesFor(merged[activePostIndex], config) },
+        }));
+        showToast({ message: "First slide image updated", tone: "success" });
+      },
+    });
+  }, [activePostIndex, config, handleOpenImagePicker, mergeClientRowsWithDefaults, rows, setGenerated, setRows, showToast]);
+
+  const handleExportSelectedSlides = React.useCallback(async (slideIndices) => {
+    if (activePostIndex == null) return;
+    const uniq = Array.from(new Set(slideIndices || [])).filter((n) => Number.isFinite(Number(n)));
+    if (!uniq.length) return;
+    for (const i of uniq) {
+      // eslint-disable-next-line no-await-in-loop
+      await downloadPost(generated, activePostIndex, { onlySlide: Number(i), baseName: exportBaseName, format: exportFormat });
+    }
+    showToast({ message: `Exported ${uniq.length} slide(s)`, tone: "success" });
+  }, [activePostIndex, downloadPost, exportBaseName, exportFormat, generated, showToast]);
+
   return (
     <div className="shell">
-      <header>
-        <div className="brand"><div className="brand-icon">✦</div><div><b>Post Generator</b><span>VIITORCLOUD</span></div></div>
-        <button
-          type="button"
-          className="theme-btn"
-          onClick={() => setSfxMuted(!sfxMuted)}
-          aria-pressed={!sfxMuted}
-          aria-label={sfxMuted ? "Unmute interface sounds" : "Mute interface sounds"}
-          title={sfxMuted ? "Sound off" : "Sound on"}
-        >
-          {sfxMuted ? "🔇" : "🔊"}
-        </button>
-        <button type="button" className="theme-btn" onClick={() => updateConfig({ theme: config.theme === "dark" ? "light" : "dark" })}>{config.theme === "dark" ? "☀" : "☾"}</button>
-      </header>
-      <div className="app">
-        <AppSidebar
-          projects={projects}
-          activeProjectId={activeProjectId}
-          loadProject={loadProject}
-          setShowNewProjectModal={setShowNewProjectModal}
-          activeProject={activeProject}
-          rows={rows}
-          config={config}
-          updateConfig={updateConfig}
-          updateBar={updateBar}
-          handleUpload={handleUpload}
-          downloadTemplate={downloadTemplate}
-          stats={stats}
-          generated={generated}
-          uploadLoading={uploadLoading}
-          mergeClientConfigWithDefaults={mergeClientConfigWithDefaults}
-          handleOpenImagePicker={handleOpenImagePicker}
-          setConfigImage={setConfigImage}
-          onGenerateAll={handleGenerateAll}
-          generateBusy={generateBusy}
-          downloadZip={() => downloadZip(generated, { baseName: exportBaseName, zipName: exportZipName })}
-          onApplyBrandingDefaults={handleApplyBrandingDefaults}
-          onResetBrandingOverrides={handleResetBrandingOverrides}
-        />
-        <main>
-          <div className="main-head">
-            <div>
-              <h2>Generated Posts</h2>
-              <p>{activeProjectId ? `Project: ${activeProject?.name} · ${rows.length} posts ready` : "No project selected"}</p>
-              {generateBusy && genProgress.total ? (
-                <p className="gen-progress" aria-live="polite">
-                  Generating {genProgress.current}/{genProgress.total}…
-                </p>
-              ) : null}
+      <AppShell
+        top={(
+          <>
+            <div className="brand">
+              <div className="brand-icon">✦</div>
+              <div><b>Post Generator</b><span>VIITORCLOUD</span></div>
             </div>
-            <div className="actions">
-              <button type="button" onClick={handleGenerateAll} disabled={!rows.length || generateBusy}>
-                {generateBusy ? "Generating…" : "Generate All Posts"}
+            <TopStepper
+              status={wizard}
+              onSelectStep={(id) => setWizardStep(id)}
+            />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                type="button"
+                className="theme-btn"
+                onClick={() => setSfxMuted(!sfxMuted)}
+                aria-pressed={!sfxMuted}
+                aria-label={sfxMuted ? "Unmute interface sounds" : "Mute interface sounds"}
+                title={sfxMuted ? "Sound off" : "Sound on"}
+              >
+                {sfxMuted ? "🔇" : "🔊"}
               </button>
-              <button type="button" onClick={() => downloadZip(generated, { baseName: exportBaseName, zipName: exportZipName })} disabled={!Object.keys(generated).length}>
-                Download All as ZIP
+              <button
+                type="button"
+                className="theme-btn"
+                onClick={() => updateConfig({ theme: config.theme === "dark" ? "light" : "dark" })}
+                aria-label="Toggle theme"
+              >
+                {config.theme === "dark" ? "☀" : "☾"}
               </button>
             </div>
-          </div>
-
-          <div className="export-row" aria-label="Export naming">
-            <label className="export-field">
-              <span>PNG prefix</span>
-              <input value={exportBaseName} onChange={(e) => setExportBaseName(e.target.value)} />
-            </label>
-            <label className="export-field">
-              <span>ZIP name</span>
-              <input value={exportZipName} onChange={(e) => setExportZipName(e.target.value)} />
-            </label>
-          </div>
-
-          <FirstRunChecklist
-            hydrated={hydrated}
+          </>
+        )}
+        left={(
+          <ConfigWorkspace
+            projects={projects}
             activeProjectId={activeProjectId}
-            rowsLength={rows.length}
-            hasBranding={hasBranding}
-            generatedCount={Object.keys(generated).length}
-          />
-
-          <PostGrid
-            animateSeed={animateSeed}
+            loadProject={loadProject}
+            setShowNewProjectModal={setShowNewProjectModal}
+            activeProject={activeProject}
+            rows={rows}
+            config={config}
+            updateConfig={updateConfig}
+            updateBar={updateBar}
+            handleUpload={handleUpload}
+            downloadTemplate={downloadTemplate}
+            stats={stats}
             generated={generated}
-            visible={visible}
-            setVisible={setVisible}
-            onDownload={(idx, opts) => downloadPost(generated, idx, { ...opts, baseName: exportBaseName })}
-            onEdit={(index) => setEditing({ index, row: generated[String(index)]?.rowData })}
             uploadLoading={uploadLoading}
-            virtualize
-            onOpenFirstSlideImage={(index) => handleOpenImagePicker({
-              title: `First slide image · Post #${index + 1}`,
-              kind: `first-slide-${index + 1}`,
-              mode: "row-first-slide",
-              rowIndex: index,
-              applyUrl: async (url, name) => {
-                const nextRows = rows.map((row, i) => (i === index ? { ...row, firstSlideImage: url, firstSlideImageName: name || row.firstSlideImageName } : row));
-                const merged = mergeClientRowsWithDefaults(nextRows);
-                setRows(merged);
-                setGenerated((prev) => ({
-                  ...prev,
-                  [index]: { ...prev[index], rowData: merged[index], slides: slidesFor(merged[index], config) },
-                }));
-              },
-            })}
+            mergeClientConfigWithDefaults={mergeClientConfigWithDefaults}
+            handleOpenImagePicker={handleOpenImagePicker}
+            setConfigImage={setConfigImage}
+            onGenerateAll={handleGenerateAll}
+            generateBusy={generateBusy}
+            downloadZip={() => downloadZip(generated, { baseName: exportBaseName, zipName: exportZipName })}
+            onApplyBrandingDefaults={handleApplyBrandingDefaults}
+            onResetBrandingOverrides={handleResetBrandingOverrides}
           />
-        </main>
-      </div>
+        )}
+        center={(
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <FirstRunChecklist
+              hydrated={hydrated}
+              activeProjectId={activeProjectId}
+              rowsLength={rows.length}
+              hasBranding={hasBranding}
+              generatedCount={Object.keys(generated).length}
+            />
+            <CanvasEditor
+              activeProjectId={activeProjectId}
+              activePostIndex={activePostIndex}
+              activeSlideIndex={activeSlideIndex}
+              setActiveSlideIndex={setActiveSlideIndex}
+              post={activePost}
+              uploadLoading={uploadLoading}
+              onInlineEditRequest={handleInlineEditRequest}
+              onOpenEdit={handleCanvasOpenEdit}
+              onOpenFirstSlideImage={handleCanvasOpenFirstSlideImage}
+            />
+          </div>
+        )}
+        right={(
+          <OutputPanel
+            activeProjectId={activeProjectId}
+            activeProjectName={activeProject?.name || ""}
+            rowsCount={rows.length}
+            generated={generated}
+            selectedPostIndex={activePostIndex}
+            onSelectPost={(i) => setActivePostIndex(i)}
+            generateBusy={generateBusy}
+            genProgress={genProgress}
+            exportBaseName={exportBaseName}
+            setExportBaseName={setExportBaseName}
+            exportZipName={exportZipName}
+            setExportZipName={setExportZipName}
+            exportFormat={exportFormat}
+            setExportFormat={setExportFormat}
+            onGenerateAll={handleGenerateAll}
+            onDownloadZip={() => downloadZip(generated, { baseName: exportBaseName, zipName: exportZipName, format: exportFormat })}
+            onExportSelectedSlides={handleExportSelectedSlides}
+          />
+        )}
+      />
+      {inlineSelection ? (
+        <InlineTextEditor
+          selection={inlineSelection}
+          value={inlineDraft}
+          onChange={setInlineDraft}
+          onCancel={() => setInlineSelection(null)}
+          onCommit={commitInlineEdit}
+        />
+      ) : null}
       {editing && <EditModal row={editing.row} config={config} onClose={() => setEditing(null)} onSave={handleSaveEdit} />}
       {showNewProjectModal && <NewProjectModal onClose={() => setShowNewProjectModal(false)} onCreate={createNewProject} creating={creatingProject} />}
       {imagePicker && (

@@ -33,7 +33,7 @@ export const domainHtml = (config, isLast) => {
       cb: "left:50%;transform:translateX(-50%);bottom:80px;",
     }[config.ctaDomainPos] || pos;
   }
-  return `<div style="position:absolute;${pos}font-size:13px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:${config.domainColor};font-family:${config.fontPara};z-index:2">${escapeHtml(config.domain)}</div>`;
+  return `<div data-edit="config:domain" style="position:absolute;${pos}font-size:13px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:${config.domainColor};font-family:${config.fontPara};z-index:2">${escapeHtml(config.domain)}</div>`;
 };
 
 export const accentBars = (config) => {
@@ -58,7 +58,7 @@ export const titleDiv = (config, text, size, gap, width, align) => {
 
 export const ctaSpan = (config, text) => {
   const bg = config.ctaGrad ? `linear-gradient(90deg,${config.ctaG1},${config.ctaG2})` : config.ctaBg;
-  return `<span class="post-cta" style="background:${bg};color:${config.ctaTxt};font-family:${config.fontCta};font-size:${config.ctaSize}px;font-weight:${config.wtCta};padding:${Math.max(14, config.ctaSize * 0.75)}px ${Math.max(30, config.ctaSize * 2)}px">${escapeHtml(text || "Learn More")}</span>`;
+  return `<span class="post-cta" data-edit="row:cta_text" style="background:${bg};color:${config.ctaTxt};font-family:${config.fontCta};font-size:${config.ctaSize}px;font-weight:${config.wtCta};padding:${Math.max(14, config.ctaSize * 0.75)}px ${Math.max(30, config.ctaSize * 2)}px">${escapeHtml(text || "Learn More")}</span>`;
 };
 
 export const buildSlide = (row, config, slideType, slideNum, total) => {
@@ -66,6 +66,7 @@ export const buildSlide = (row, config, slideType, slideNum, total) => {
   const isLast = slideType === "last";
   const isMid = !isFirst && !isLast;
   const title = isFirst ? row.slide1_title || row.title || "" : isLast ? row[`slide${total}_title`] || row.last_title || "" : row[`slide${slideNum}_title`] || "";
+  const titleEdit = isFirst ? "row:slide1_title" : isLast ? `row:slide${total}_title` : `row:slide${slideNum}_title`;
   const paragraph = isMid ? row[`slide${slideNum}_paragraph`] || "" : "";
   const cta = isLast ? row.cta_text || "Learn More" : "";
   let h = config.hAlign; let v = config.vAlign;
@@ -79,14 +80,25 @@ export const buildSlide = (row, config, slideType, slideNum, total) => {
   const swipe = isFirst ? `<div class="swipe-note">Swipe to explore -></div>` : "";
   const paraHighlight = config.highlight ? `background:${config.highlightColor};padding:6px 12px;border-radius:6px;` : "";
   const paraHtml = paragraph
-    ? `<div style="font-size:${config.paraSize}px;font-family:${config.fontPara};font-weight:${config.wtPara};color:${config.paraColor};text-align:${h};margin-bottom:${config.gapPC}px;width:100%;max-width:${config.contentWidth}px;line-height:1.65;${paraHighlight}">${escapeHtml(paragraph)}</div>`
+    ? `<div data-edit="row:slide${slideNum}_paragraph" style="font-size:${config.paraSize}px;font-family:${config.fontPara};font-weight:${config.wtPara};color:${config.paraColor};text-align:${h};margin-bottom:${config.gapPC}px;width:100%;max-width:${config.contentWidth}px;line-height:1.65;${paraHighlight}">${escapeHtml(paragraph)}</div>`
     : "";
-  return `<div class="brand-post">${buildBg(config, isFirst, row)}${buildLogo(config, isLast)}${dots}${number}${swipe}<div class="post-content-area" style="justify-content:${vJust(v)};align-items:${justify(h)}">${titleDiv(config, title, isFirst ? Math.min(Number(config.titleSize) + 6, 86) : Number(config.titleSize) - 4, config.gapTP, config.contentWidth, h)}${paraHtml}${isLast ? `<div class="post-cta-wrap" style="justify-content:${justify(h)};width:100%;margin-top:${config.gapPC}px">${ctaSpan(config, cta)}</div>` : ""}</div>${domainHtml(config, isLast)}${accentBars(config)}</div>`;
+  const titleHtml = titleDiv(
+    config,
+    title,
+    isFirst ? Math.min(Number(config.titleSize) + 6, 86) : Number(config.titleSize) - 4,
+    config.gapTP,
+    config.contentWidth,
+    h,
+  );
+  const titleWrapped = titleHtml.replace("<div ", `<div data-edit="${titleEdit}" `);
+  return `<div class="brand-post">${buildBg(config, isFirst, row)}${buildLogo(config, isLast)}${dots}${number}${swipe}<div class="post-content-area" style="justify-content:${vJust(v)};align-items:${justify(h)}">${titleWrapped}${paraHtml}${isLast ? `<div class="post-cta-wrap" style="justify-content:${justify(h)};width:100%;margin-top:${config.gapPC}px">${ctaSpan(config, cta)}</div>` : ""}</div>${domainHtml(config, isLast)}${accentBars(config)}</div>`;
 };
 
 export const buildSingle = (row, config) => {
   const h = config.hAlign;
-  return `<div class="brand-post">${buildBg(config, true, {})}${buildLogo(config, false)}<div class="post-content-area" style="justify-content:${vJust(config.vAlign)};align-items:${justify(h)}">${titleDiv(config, row.title || "", config.titleSize, config.gapTP, config.contentWidth, h)}<div style="font-size:${config.paraSize}px;font-family:${config.fontPara};font-weight:${config.wtPara};color:${config.paraColor};text-align:${h};margin-bottom:${config.gapPC}px;width:100%;max-width:${config.contentWidth}px;line-height:1.65;${config.highlight ? `background:${config.highlightColor};padding:6px 12px;border-radius:6px;` : ""}">${escapeHtml(row.paragraph || "")}</div><div class="post-cta-wrap" style="justify-content:${justify(h)};width:100%">${ctaSpan(config, row.cta_text)}</div></div>${domainHtml(config, false)}${accentBars(config)}</div>`;
+  const titleHtml = titleDiv(config, row.title || "", config.titleSize, config.gapTP, config.contentWidth, h);
+  const titleWrapped = titleHtml.replace("<div ", `<div data-edit="row:title" `);
+  return `<div class="brand-post">${buildBg(config, true, {})}${buildLogo(config, false)}<div class="post-content-area" style="justify-content:${vJust(config.vAlign)};align-items:${justify(h)}">${titleWrapped}<div data-edit="row:paragraph" style="font-size:${config.paraSize}px;font-family:${config.fontPara};font-weight:${config.wtPara};color:${config.paraColor};text-align:${h};margin-bottom:${config.gapPC}px;width:100%;max-width:${config.contentWidth}px;line-height:1.65;${config.highlight ? `background:${config.highlightColor};padding:6px 12px;border-radius:6px;` : ""}">${escapeHtml(row.paragraph || "")}</div><div class="post-cta-wrap" style="justify-content:${justify(h)};width:100%">${ctaSpan(config, row.cta_text)}</div></div>${domainHtml(config, false)}${accentBars(config)}</div>`;
 };
 
 export const slidesFor = (row, config) => {

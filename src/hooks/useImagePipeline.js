@@ -19,6 +19,7 @@ export const useImagePipeline = ({
   showToast,
 }) => {
   const [imagePicker, setImagePicker] = React.useState(null);
+  const pickerKind = imagePicker?.kind ? String(imagePicker.kind) : "";
   const [pickerAssets, setPickerAssets] = React.useState([]);
   const [pickerCursorStack, setPickerCursorStack] = React.useState([""]);
   const pickerPage = pickerCursorStack.length;
@@ -35,17 +36,17 @@ export const useImagePipeline = ({
   const pickerUploadRef = React.useRef(null);
 
   React.useEffect(() => {
-    if (!imagePicker) return;
+    if (!pickerKind) return;
     const t = window.setTimeout(() => setPickerSearchDebounced(pickerSearch.trim()), 220);
     return () => window.clearTimeout(t);
-  }, [imagePicker, pickerSearch]);
+  }, [pickerKind, pickerSearch]);
 
   React.useEffect(() => {
-    if (!imagePicker) return;
+    if (!pickerKind) return;
     listCacheRef.current.clear();
     inflightRef.current.clear();
-    setPickerCursorStack([""]);
-  }, [imagePicker, pickerProjectOnly, pickerSearchDebounced]);
+    setPickerCursorStack((prev) => (prev.length === 1 && prev[0] === "" ? prev : [""]));
+  }, [pickerKind, pickerProjectOnly, pickerSearchDebounced]);
 
   const cacheKeyFor = React.useCallback((kind, cursor, pageSize, q, projectOnly) => (
     `${kind}|${cursor || ""}|${pageSize}|${q || ""}|${projectOnly ? "1" : "0"}`
@@ -120,23 +121,31 @@ export const useImagePipeline = ({
     return next;
   }, [assetDefaults]);
 
+  const pickerOpenRef = React.useRef(false);
+
   React.useEffect(() => {
     if (!imagePicker) {
-      setPickerAssets([]);
-      setPickerTotal(0);
-      setPickerHasMore(false);
-      setPickerSearch("");
-      setPickerSearchDebounced("");
-      setPickerProjectOnly(false);
-      setPickerCursorStack([""]);
+      // IMPORTANT: do not reset picker state on every render while closed.
+      // Only reset when transitioning from open -> closed.
+      if (pickerOpenRef.current) {
+        pickerOpenRef.current = false;
+        setPickerAssets([]);
+        setPickerTotal(0);
+        setPickerHasMore(false);
+        setPickerSearch("");
+        setPickerSearchDebounced("");
+        setPickerProjectOnly(false);
+        setPickerCursorStack([""]);
+      }
       return;
     }
+    pickerOpenRef.current = true;
     let cancelled = false;
     setPickerLoading(true);
     const pageSize = 10;
     const cursor = pickerCursorStack[pickerCursorStack.length - 1] ?? "";
     fetchPickerPage({
-      kind: imagePicker.kind,
+      kind: pickerKind,
       cursor,
       pageSize,
       q: pickerSearchDebounced,
@@ -155,7 +164,7 @@ export const useImagePipeline = ({
         if (!cancelled) setPickerLoading(false);
       });
     return () => { cancelled = true; };
-  }, [activeProjectId, fetchPickerPage, imagePicker, pickerCursorStack, pickerProjectOnly, pickerSearchDebounced, showToast]);
+  }, [activeProjectId, fetchPickerPage, imagePicker, pickerCursorStack, pickerKind, pickerProjectOnly, pickerSearchDebounced, showToast]);
 
   const storeImageAsset = React.useCallback(async (file, kind, loadingKey = "") => {
     if (!file) return "";

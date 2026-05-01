@@ -4,16 +4,21 @@ Generate branded single-post and carousel images from Excel data. Built with Rea
 
 ## Features
 
-- Create named projects, then load Excel files into them
-- Re-uploading Excel to the same project updates rows — no duplicate projects
+- Create named projects, then load Excel files into them (re-upload updates rows — no duplicate projects)
+- Step-by-step workflow: Upload Data → Configure Branding → Adjust Layout → Preview → Export
+- 3-panel editor UI:
+  - Left: project + Excel + branding + layout controls
+  - Center: live canvas with pan/zoom/fit + slide thumbnails + inline text editing
+  - Right: outputs list + batch export tools
 - Generate single posts or 6-slide carousels with live preview
 - Upload background, logo, last-slide logo, and per-row first-slide images (Firebase Storage)
 - **Asset library modal:** paginated inventory (10 per page), default preview in the header, low-res thumbnails in the grid, full-resolution preview on hover/focus, “Upload new” as the first card
 - **Storage layout (new uploads):** images are stored under typed folders per project — `assets/logo/`, `assets/background/`, `assets/last-slide-logo/`, `assets/first-slide-image/` (legacy flat `assets/` files are still listed)
 - Client-generated **JPEG thumbnails** on upload; listings prefer `thumbUrl` when present
-- Edit post content and alignment inline
+- Edit post content inline (click text on the canvas to edit)
+- Edit full post fields via the **Edit** button (modal editor)
 - Smooth UI animations + “card deal” animation when posts populate (with subtle SFX)
-- Download individual posts or all as ZIP
+- Export PNG/JPG per slide, export selected slides, or download all as ZIP
 
 ## Tech Stack
 
@@ -31,7 +36,7 @@ Generate branded single-post and carousel images from Excel data. Built with Rea
 ├── src/
 │   ├── main.jsx                 # App bootstrap (root + styles)
 │   ├── app/App.jsx              # Shell: state, hooks, layout
-│   ├── components/              # UI (sidebar, grid, modals, preview)
+│   ├── components/              # UI (shell, panels, canvas editor, modals, preview)
 │   ├── hooks/                   # useImagePipeline, usePostGeneration, persistence, etc.
 │   └── lib/                     # API helpers, slide HTML, constants, asset defaults
 ├── functions/
@@ -143,10 +148,11 @@ firebase deploy --only functions
 
 1. Click **+ New Project** and enter a project name
 2. Upload an Excel file into the project
-3. Configure theme, colors, fonts, and branding in the sidebar
-4. Use image pickers (background, logo, etc.) to choose from the library or upload new assets
-5. Click **Generate All Posts**
-6. Download individual PNGs or all as ZIP
+3. Configure branding (background/logo) + layout in the left panel
+4. Click **Generate All Posts**
+5. Select an output on the right to open it in the canvas
+6. Edit text directly on the canvas (click text), or click **Edit** for full field editing
+7. Export from the right panel (PNG/JPG, selected slides, or ZIP)
 
 ## Troubleshooting
 
