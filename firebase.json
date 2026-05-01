@@ -2,7 +2,14 @@
   "hosting": {
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    "rewrites": [
+      { "source": "/getProjects", "function": "getProjects" },
+      { "source": "/createProject", "function": "createProject" },
+      { "source": "/saveProject", "function": "saveProject" },
+      { "source": "/deleteProject", "function": "deleteProject" },
+      { "source": "/uploadAsset", "function": "uploadAsset" },
+      { "source": "**", "destination": "/index.html" }
+    ]
   },
   "functions": {
     "source": "functions",

@@ -72,6 +72,8 @@ VITE_FUNCTIONS_URL=http://127.0.0.1:5001/YOUR_PROJECT_ID/us-central1
 # VITE_FUNCTIONS_URL=https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net
 ```
 
+In production, you can also omit `VITE_FUNCTIONS_URL` entirely and let Firebase Hosting rewrites proxy requests (recommended to avoid CORS).
+
 Edit `.firebaserc`:
 ```json
 {
@@ -125,7 +127,13 @@ npm run deploy
 If browser shows CORS preflight error like:
 - `No 'Access-Control-Allow-Origin' header`
 
-Make sure Cloud Functions deployed include CORS enabled (Gen 2 `onRequest({ cors: true })`) and redeploy:
+Recommended fix: route function calls through **Firebase Hosting rewrites** (same origin). Ensure `firebase.json` has rewrites for endpoints like `/uploadAsset`, then deploy:
+
+```bash
+firebase deploy --only functions,hosting
+```
+
+If you still call Cloud Functions directly across origins, make sure deployed functions include CORS enabled (Gen 2 `onRequest({ cors: true })`) and redeploy:
 
 ```bash
 firebase deploy --only functions

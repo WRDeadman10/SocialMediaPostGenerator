@@ -5,7 +5,15 @@ import html2canvas from "html2canvas";
 import JSZip from "jszip";
 import "./styles.css";
 
-const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || "http://127.0.0.1:5001/YOUR_PROJECT_ID/us-central1";
+// Production: Firebase Hosting rewrites proxy calls (same-origin, no CORS).
+// Local dev: set VITE_FUNCTIONS_URL to emulator base URL.
+const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || "";
+
+function fnUrl(endpoint) {
+  const base = String(FUNCTIONS_URL || "").replace(/\/+$/, "");
+  const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  return base ? `${base}${path}` : path;
+}
 
 const fonts = ["DM Sans", "Inter", "Poppins", "Montserrat", "Lato", "Raleway", "Oswald", "Merriweather", "Nunito", "Playfair Display", "Aptos"];
 const defaultConfig = {
@@ -173,7 +181,7 @@ function App() {
 
   // Load all projects from Firestore on mount
   React.useEffect(() => {
-    fetch(`${FUNCTIONS_URL}/getProjects`)
+    fetch(fnUrl("/getProjects"))
       .then((r) => r.json())
       .then((data) => {
         if (!data?.projects) { setHydrated(true); return; }
@@ -208,7 +216,7 @@ function App() {
     const id = setTimeout(() => {
       const project = projects[activeProjectId];
       if (!project) return;
-      fetch(`${FUNCTIONS_URL}/saveProject`, {
+      fetch(fnUrl("/saveProject"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId: activeProjectId, project }),
@@ -283,7 +291,7 @@ function App() {
     if (!name?.trim()) return;
     setCreatingProject(true);
     try {
-      const res = await fetch(`${FUNCTIONS_URL}/createProject`, {
+      const res = await fetch(fnUrl("/createProject"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),
@@ -389,9 +397,9 @@ function App() {
       const isNetwork = error instanceof TypeError && String(error.message || "").toLowerCase().includes("fetch");
       if (!isNetwork) throw error;
       const hint =
-        FUNCTIONS_URL.includes("socialmediapostgenerator-007")
+        String(FUNCTIONS_URL || "").includes("YOUR_PROJECT_ID")
           ? "Set VITE_FUNCTIONS_URL (project id) in .env.local"
-          : (window.location.protocol === "https:" && FUNCTIONS_URL.startsWith("http:"))
+          : (window.location.protocol === "https:" && String(FUNCTIONS_URL || "").startsWith("http:"))
             ? "Your app is HTTPS but VITE_FUNCTIONS_URL is HTTP (mixed content). Use HTTPS Cloud Functions URL."
             : "If using emulators, run `npm run emulate` and ensure VITE_FUNCTIONS_URL matches emulator project id.";
       throw new Error(`Failed to fetch. ${hint}`);
@@ -405,7 +413,7 @@ function App() {
       return "";
     }
     const dataUrl = await fileToDataUrl(file);
-    const result = await postJson(`${FUNCTIONS_URL}/uploadAsset`, { projectId: activeProjectId, kind, fileName: file.name, dataUrl });
+    const result = await postJson(fnUrl("/uploadAsset"), { projectId: activeProjectId, kind, fileName: file.name, dataUrl });
     if (!result?.url) throw new Error("Could not save image");
     return result.url;
   }
