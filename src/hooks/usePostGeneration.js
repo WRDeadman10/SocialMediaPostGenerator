@@ -13,6 +13,8 @@ export const usePostGeneration = ({
   showToast,
   hydrated,
   editing,
+  setGenerateBusy,
+  setGenProgress,
 }) => {
   const lastGeneratedCountRef = React.useRef(0);
 
@@ -28,18 +30,31 @@ export const usePostGeneration = ({
     return () => clearTimeout(id);
   }, [config, regenerateGenerated, rows]);
 
-  const generateAll = React.useCallback(() => {
-    const next = {};
-    rows.forEach((row, i) => {
-      next[i] = { type: (row.post_type || "single").toLowerCase().trim(), rowData: row, slides: slidesFor(row, config) };
-    });
-    setGenerated(next);
-    setAnimateSeed(Date.now());
-    playSfx("generate");
-    showToast(`${rows.length} posts generated`);
-  }, [config, playSfx, rows, setAnimateSeed, setGenerated, showToast]);
+  const generateAll = React.useCallback(async () => {
+    if (!rows.length) return;
+    setGenerateBusy?.(true);
+    setGenProgress?.({ current: 0, total: rows.length });
+    try {
+      const next = {};
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        next[i] = { type: (row.post_type || "single").toLowerCase().trim(), rowData: row, slides: slidesFor(row, config) };
+        setGenerated({ ...next });
+        setGenProgress?.({ current: i + 1, total: rows.length });
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      setAnimateSeed(Date.now());
+      playSfx("generate");
+      showToast?.({ message: `${rows.length} posts generated`, tone: "success" });
+    } catch (e) {
+      showToast?.({ message: e?.message || "Generation failed", tone: "error" });
+    } finally {
+      setGenerateBusy?.(false);
+      setGenProgress?.({ current: 0, total: 0 });
+    }
+  }, [config, playSfx, rows, setAnimateSeed, setGenProgress, setGenerateBusy, setGenerated, showToast]);
 
-  const applyEdit = React.useCallback((row, modalConfig = config) => {
+  const applyEdit = React.useCallback((row, modalConfig = config, meta) => {
     if (editing == null) return;
     const nextRows = rows.map((r, i) => (i === editing.index ? row : r));
     setRows(nextRows);
@@ -51,6 +66,7 @@ export const usePostGeneration = ({
     setEditing(null);
     setAnimateSeed(Date.now());
     playSfx("apply");
+    return meta;
   }, [config, editing, playSfx, rows, setAnimateSeed, setConfig, setEditing, setGenerated, setRows]);
 
   const onGeneratedCountSfx = React.useCallback((generated) => {

@@ -1,12 +1,53 @@
 import React from "react";
+import { useFocusTrap } from "../../hooks/useFocusTrap.js";
 
 const projectNameFromId = (projects, projectId) => projects?.[projectId]?.name || projectId || "";
 
 const listThumbUrl = (asset) => asset.thumbUrl || asset.url;
 
+const RECENTS_KEY = "smpg:recentAssets:v1";
+
+const readRecents = () => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RECENTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeRecents = (next) => {
+  try {
+    window.localStorage.setItem(RECENTS_KEY, JSON.stringify(next.slice(0, 24)));
+  } catch {
+    // ignore
+  }
+};
+
+const pushRecent = (kind, asset) => {
+  if (typeof window === "undefined") return;
+  if (!kind || !asset?.url) return;
+  const prev = readRecents();
+  const entry = {
+    kind: String(kind),
+    url: String(asset.url),
+    thumbUrl: asset.thumbUrl ? String(asset.thumbUrl) : "",
+    fileName: String(asset.fileName || ""),
+    projectId: asset.projectId ? String(asset.projectId) : "",
+    id: asset.id ? String(asset.id) : "",
+    at: Date.now(),
+  };
+  const filtered = prev.filter((x) => !(x.kind === entry.kind && x.url === entry.url));
+  writeRecents([entry, ...filtered]);
+};
+
 export const AssetPickerModal = ({
   title,
+  pickerKind,
   projects,
+  activeProjectId,
   assets,
   loadingList,
   loadingUpload,
@@ -17,7 +58,13 @@ export const AssetPickerModal = ({
   pageSize,
   total,
   hasMore,
+  hasPrev,
   onPageChange,
+  onPrefetchNext,
+  search,
+  onSearchChange,
+  projectOnly,
+  onProjectOnlyChange,
   onClose,
   onPick,
   onUploadClick,
@@ -25,10 +72,24 @@ export const AssetPickerModal = ({
   onSetDefault,
 }) => {
   const [hoverHighUrl, setHoverHighUrl] = React.useState("");
+  const [navIndex, setNavIndex] = React.useState(0);
+  const initialFocusRef = React.useRef(null);
+  const closeRef = React.useRef(null);
+  const gridRef = React.useRef(null);
+  const itemRefs = React.useRef([]);
+
+  const titleId = React.useId();
+  const { containerRef } = useFocusTrap({ enabled: true, onClose, initialFocusRef: initialFocusRef });
+
+  const recents = React.useMemo(() => {
+    const k = String(pickerKind || "");
+    return readRecents().filter((r) => !k || r.kind === k).slice(0, 8);
+  }, [pickerKind]);
 
   React.useEffect(() => {
     setHoverHighUrl("");
-  }, [assets, page]);
+    setNavIndex(0);
+  }, [assets, page, search, projectOnly]);
 
   const handleUploadInputChange = (e) => {
     const file = e.target.files?.[0];
@@ -45,11 +106,116 @@ export const AssetPickerModal = ({
     setHoverHighUrl("");
   };
 
+  const focusNavIndex = React.useCallback((nextIdx) => {
+    const maxIdx = assets.length; // 0 = upload card
+    const clamped = Math.max(0, Math.min(maxIdx, nextIdx));
+    setNavIndex(clamped);
+    const el = itemRefs.current[clamped];
+    el?.focus?.();
+  }, [assets.length]);
+
+  const colsForGrid = React.useCallback(() => {
+    const grid = gridRef.current;
+    if (!grid) return 1;
+    const styles = window.getComputedStyle(grid);
+    const template = styles.gridTemplateColumns || "";
+    const parts = template.split(" ").filter(Boolean);
+    if (parts.length) return Math.max(1, parts.length);
+    const w = grid.clientWidth || 1;
+    const min = 132;
+    return Math.max(1, Math.floor(w / min));
+  }, []);
+
+  const handleGridKeyDown = (e) => {
+    if (!gridRef.current) return;
+    const maxIdx = assets.length;
+    if (!maxIdx && e.key !== "u") return;
+
+    const target = e.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+      return;
+    }
+
+    if ((e.key === "u" || e.key === "U") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      onUploadClick?.();
+      return;
+    }
+
+    if ((e.key === "n" || e.key === "N") && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      if (hasMore && !loadingList) {
+        e.preventDefault();
+        onPageChange?.(page + 1);
+      }
+      return;
+    }
+
+    if ((e.key === "p" || e.key === "P") && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      if (hasPrev && !loadingList) {
+        e.preventDefault();
+        onPageChange?.(page - 1);
+      }
+      return;
+    }
+
+    if (e.key === "Enter") {
+      if (navIndex === 0) {
+        e.preventDefault();
+        onUploadClick?.();
+      }
+      return;
+    }
+
+    if (e.key === "d" || e.key === "D") {
+      if (navIndex > 0) {
+        const asset = assets[navIndex - 1];
+        if (asset) {
+          e.preventDefault();
+          onSetDefault?.(asset);
+        }
+      }
+      return;
+    }
+
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      focusNavIndex(Math.min(maxIdx, navIndex + 1));
+      return;
+    }
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      focusNavIndex(Math.max(0, navIndex - 1));
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const cols = colsForGrid();
+      focusNavIndex(Math.min(maxIdx, navIndex + cols));
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const cols = colsForGrid();
+      focusNavIndex(Math.max(0, navIndex - cols));
+    }
+  };
+
+  const handlePick = (asset) => {
+    pushRecent(String(pickerKind || ""), asset);
+    onPick(asset);
+  };
+
   return (
     <div className="modal" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
-      <div className="dialog asset-dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <div
+        ref={containerRef}
+        className="dialog asset-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
         <div className="dialog-head asset-dialog-head">
-          <h2>{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <div className="asset-dialog-head-right">
             {defaultPreviewUrl ? (
               <div className="asset-default-corner" title="Current default for new rows / all projects">
@@ -62,27 +228,72 @@ export const AssetPickerModal = ({
                 />
               </div>
             ) : null}
-            <button type="button" className="asset-dialog-close" onClick={onClose} aria-label="Close image picker">
+            <button ref={closeRef} type="button" className="asset-dialog-close" onClick={onClose} aria-label="Close image picker">
               ×
             </button>
           </div>
         </div>
         <div className="dialog-body asset-body">
           <input ref={uploadInputRef} hidden type="file" accept="image/*" onChange={handleUploadInputChange} />
+          <div className="asset-toolbar">
+            <label className="asset-search">
+              <span className="sr-only">Search library</span>
+              <input
+                value={search}
+                onChange={(e) => onSearchChange?.(e.target.value)}
+                placeholder="Search by file name…"
+                aria-label="Search assets by file name"
+              />
+            </label>
+            <label className="asset-filter-toggle">
+              <input
+                type="checkbox"
+                checked={!!projectOnly}
+                onChange={(e) => onProjectOnlyChange?.(e.target.checked)}
+              />
+              <span>This project only</span>
+            </label>
+          </div>
+          {recents.length > 0 && (
+            <div className="asset-recents" aria-label="Recently used images">
+              <div className="asset-recents-label">Recent</div>
+              <div className="asset-recents-row">
+                {recents.map((r) => (
+                  <button
+                    type="button"
+                    key={`${r.kind}:${r.url}`}
+                    className="asset-recent-chip"
+                    style={{ backgroundImage: `url(${r.thumbUrl || r.url})` }}
+                    title={r.fileName || "Recent"}
+                    aria-label={`Recent image ${r.fileName || ""}`}
+                    onClick={() => onPick({ url: r.url, thumbUrl: r.thumbUrl || r.url, fileName: r.fileName, projectId: r.projectId, id: r.id })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           <div className="asset-hover-preview-bar" aria-live="polite">
             {hoverHighUrl ? (
               <img className="asset-hover-preview-img" src={hoverHighUrl} alt="" decoding="async" />
             ) : (
-              <span className="asset-preview-placeholder">Hover a card to preview full resolution</span>
+              <span className="asset-preview-placeholder">Hover or focus a card to preview full resolution</span>
             )}
           </div>
           <div
+            ref={gridRef}
             className="asset-picker-grid"
             onPointerLeave={handlePointerLeaveGrid}
+            onKeyDown={handleGridKeyDown}
           >
             <button
+              ref={(el) => {
+                itemRefs.current[0] = el;
+                initialFocusRef.current = el;
+              }}
               type="button"
               className="asset-upload-card"
+              tabIndex={navIndex === 0 ? 0 : -1}
+              onFocus={() => { setNavIndex(0); setHoverHighUrl(""); }}
               onClick={onUploadClick}
               disabled={loadingUpload}
               aria-busy={loadingUpload}
@@ -91,38 +302,41 @@ export const AssetPickerModal = ({
               <span className="asset-upload-plus" aria-hidden="true">+</span>
               <span className="asset-upload-label">{loadingUpload ? "Uploading…" : "Upload new"}</span>
             </button>
-            {!loadingList && assets.map((asset) => (
-              <article
-                className="asset-inventory-card"
-                key={asset.id}
-                onPointerEnter={() => handlePointerEnterAsset(asset)}
-              >
-                <button
-                  type="button"
-                  className="asset-inventory-thumb"
-                  style={{ backgroundImage: `url(${listThumbUrl(asset)})` }}
-                  onClick={() => onPick(asset)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onPick(asset);
-                    }
-                  }}
-                  onFocus={() => handlePointerEnterAsset(asset)}
-                  tabIndex={0}
-                  aria-label={`Use image ${asset.fileName || ""}`}
-                />
-                <div className="asset-inventory-meta">
-                  <small title={asset.fileName || ""}>{projectNameFromId(projects, asset.projectId)}</small>
-                  <div className="asset-inventory-actions">
-                    <button type="button" onClick={() => onPick(asset)}>Use</button>
-                    <button type="button" disabled={busyAssetId === asset.id} onClick={() => onSetDefault(asset)}>
-                      {busyAssetId === asset.id ? "Saving…" : "Default"}
-                    </button>
+            {!loadingList && assets.map((asset, i) => {
+              const idx = i + 1;
+              const label = `Use image ${asset.fileName || "untitled"} from ${projectNameFromId(projects, asset.projectId)}`;
+              const isCurrentProject = !!activeProjectId && asset.projectId === activeProjectId;
+              return (
+                <div
+                  key={asset.id || asset.url}
+                  className={`asset-inventory-card ${isCurrentProject ? "asset-inventory-card-current" : ""}`}
+                  onPointerEnter={() => handlePointerEnterAsset(asset)}
+                >
+                  <button
+                    ref={(el) => { itemRefs.current[idx] = el; }}
+                    type="button"
+                    tabIndex={navIndex === idx ? 0 : -1}
+                    className="asset-inventory-thumb"
+                    style={{ backgroundImage: `url(${listThumbUrl(asset)})` }}
+                    aria-label={label}
+                    onFocus={() => { setNavIndex(idx); handlePointerEnterAsset(asset); }}
+                    onClick={() => handlePick(asset)}
+                  />
+                  <button
+                    type="button"
+                    className="asset-default-fab"
+                    disabled={busyAssetId === asset.id}
+                    onClick={(e) => { e.stopPropagation(); onSetDefault?.(asset); }}
+                    aria-label={`Set ${asset.fileName || "image"} as default`}
+                  >
+                    {busyAssetId === asset.id ? "…" : "★"}
+                  </button>
+                  <div className="asset-inventory-meta">
+                    <small title={asset.fileName || ""}>{projectNameFromId(projects, asset.projectId)}</small>
                   </div>
                 </div>
-              </article>
-            ))}
+              );
+            })}
           </div>
           {loadingList && <div className="asset-loading">Loading library…</div>}
           {!loadingList && !assets.length && (
@@ -132,7 +346,7 @@ export const AssetPickerModal = ({
             <button
               type="button"
               className="asset-page-btn"
-              disabled={page <= 1 || loadingList}
+              disabled={!hasPrev || loadingList}
               onClick={() => onPageChange?.(page - 1)}
             >
               Previous
@@ -146,10 +360,15 @@ export const AssetPickerModal = ({
               className="asset-page-btn"
               disabled={!hasMore || loadingList}
               onClick={() => onPageChange?.(page + 1)}
+              onMouseEnter={() => onPrefetchNext?.()}
+              onFocus={() => onPrefetchNext?.()}
             >
               Next
             </button>
           </div>
+          <p className="asset-kb-hint" aria-hidden="true">
+            Keys: arrows move · Enter picks · D default · U upload · N/P pages
+          </p>
         </div>
         <div className="dialog-foot asset-dialog-foot">
           <button type="button" onClick={onClose}>Close</button>

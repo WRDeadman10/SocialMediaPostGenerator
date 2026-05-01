@@ -73,7 +73,15 @@ export const useProjectActions = ({
     setRows(data);
     setGenerated({});
     setVisible({});
-    showToast(`Loaded ${data.length} rows from ${file.name}`);
+    const first = data[0] || {};
+    const cols = Object.keys(first).filter((k) => k !== "_index");
+    const previewCols = cols.slice(0, 10);
+    const extra = Math.max(0, cols.length - previewCols.length);
+    const colText = `${previewCols.join(" · ")}${extra ? ` · +${extra} more` : ""}`;
+    showToast({
+      message: `Loaded ${data.length} rows from ${file.name}. Columns: ${colText || "(none detected)"}.`,
+      tone: "success",
+    });
   }, [activeProjectId, setGenerated, setProjects, setRows, setVisible, showToast]);
 
   const loadProject = React.useCallback((id) => {

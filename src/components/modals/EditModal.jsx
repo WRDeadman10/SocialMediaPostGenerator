@@ -2,6 +2,7 @@ import React from "react";
 import { slidesFor } from "../../lib/slideHtml.js";
 import { Field, Range } from "../ui/FormBits.jsx";
 import { Preview } from "../Preview.jsx";
+import { useFocusTrap } from "../../hooks/useFocusTrap.js";
 
 export const EditModal = ({ row, onSave, onClose, config }) => {
   const [draft, setDraft] = React.useState(row);
@@ -13,10 +14,24 @@ export const EditModal = ({ row, onSave, onClose, config }) => {
   const set = (key, value) => { setDraft((prev) => ({ ...prev, [key]: value })); };
   const setLocal = (patch) => { setLocalConfig((prev) => ({ ...prev, ...patch })); };
 
+  const closeRef = React.useRef(null);
+  const { containerRef } = useFocusTrap({ enabled: true, onClose, initialFocusRef: closeRef });
+
   return (
-    <div className="modal">
-      <div className="dialog">
-        <div className="dialog-head"><h2>Edit Post</h2><button type="button" onClick={onClose}>×</button></div>
+    <div className="modal" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
+      <div
+        ref={containerRef}
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-modal-title"
+      >
+        <div className="dialog-head">
+          <h2 id="edit-modal-title">Edit Post</h2>
+          <button ref={closeRef} type="button" onClick={onClose} aria-label="Close editor">
+            ×
+          </button>
+        </div>
         <div className="dialog-body">
           <div className="edit-fields">
             <div className="modal-section-title">Slide Content</div>

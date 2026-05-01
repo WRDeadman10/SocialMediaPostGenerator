@@ -343,7 +343,26 @@ export const listAssets = onRequest({ cors, invoker }, async (req, res) => {
     const { kind } = req.body || {};
     const page = Math.max(1, Number(req.body?.page) || 1);
     const pageSize = Math.min(50, Math.max(1, Number(req.body?.pageSize) || 10));
+    const q = String(req.body?.q || "").trim().toLowerCase();
+    const projectOnly = !!req.body?.projectOnly;
+    const activeProjectId = String(req.body?.activeProjectId || "");
+    const cursorRaw = req.body?.cursor;
     const baseKind = baseKindFromKind(kind);
+
+    const decodeOffsetCursor = (raw) => {
+      if (raw == null || raw === "") return null;
+      try {
+        const json = decodeURIComponent(String(raw));
+        const parsed = JSON.parse(json);
+        const offset = Number(parsed?.o);
+        if (!Number.isFinite(offset) || offset < 0) return null;
+        return offset;
+      } catch {
+        return null;
+      }
+    };
+
+    const encodeOffsetCursor = (offset) => encodeURIComponent(JSON.stringify({ o: offset }));
 
     const fsLimit = 500;
     const query = db.collection("assetLibrary").where("baseKind", "==", baseKind).orderBy("createdAt", "desc").limit(fsLimit);
@@ -369,10 +388,31 @@ export const listAssets = onRequest({ cors, invoker }, async (req, res) => {
     }
     deduped.sort((a, b) => assetSortMs(b) - assetSortMs(a));
 
-    const total = deduped.length;
-    const start = (page - 1) * pageSize;
-    const pageSlice = deduped.slice(start, start + pageSize);
+    let filtered = deduped;
+    if (q) {
+      filtered = filtered.filter((a) => {
+        const name = String(a.fileName || "").toLowerCase();
+        const url = String(a.url || "").toLowerCase();
+        return name.includes(q) || url.includes(q);
+      });
+    }
+    if (projectOnly && activeProjectId) {
+      filtered = filtered.filter((a) => String(a.projectId || "") === activeProjectId);
+    }
+
+    const total = filtered.length;
+
+    const cursorOffset = decodeOffsetCursor(cursorRaw);
+    const start = cursorOffset != null
+      ? Math.min(cursorOffset, Math.max(0, total - 1))
+      : (page - 1) * pageSize;
+    const safeStart = Math.max(0, Math.min(start, total));
+    const pageSlice = filtered.slice(safeStart, safeStart + pageSize);
     const withThumbs = await attachThumbUrlsForPage(bucket, pageSlice);
+
+    const nextOffset = safeStart + pageSize;
+    const hasMore = nextOffset < total;
+    const nextCursor = hasMore ? encodeOffsetCursor(nextOffset) : "";
 
     res.json({
       ok: true,
@@ -380,7 +420,8 @@ export const listAssets = onRequest({ cors, invoker }, async (req, res) => {
       total,
       page,
       pageSize,
-      hasMore: start + pageSize < total,
+      hasMore,
+      nextCursor,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

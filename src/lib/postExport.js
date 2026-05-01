@@ -2,6 +2,12 @@ import html2canvas from "html2canvas";
 import JSZip from "jszip";
 import { downloadBlob } from "./files.js";
 
+const safeFilePart = (value) => String(value || "export")
+  .trim()
+  .replace(/[<>:"/\\|?*]+/g, "-")
+  .replace(/\s+/g, "_")
+  .slice(0, 80) || "export";
+
 export const createPostExporter = (renderRef) => {
   const renderPng = async (html) => {
     renderRef.current.innerHTML = html;
@@ -13,28 +19,44 @@ export const createPostExporter = (renderRef) => {
     return canvas;
   };
 
-  const downloadPost = async (generated, index) => {
+  const downloadPost = async (generated, index, options = {}) => {
     const post = generated[index];
     if (!post) return;
-    for (let i = 0; i < post.slides.length; i++) {
-      const canvas = await renderPng(post.slides[i]);
-      canvas.toBlob((blob) => downloadBlob(blob, `post_${Number(index) + 1}${post.slides.length > 1 ? `_slide${i + 1}` : ""}.png`));
+    const base = safeFilePart(options.baseName ?? "post");
+    const onlySlide = options.onlySlide == null ? null : Number(options.onlySlide);
+    const slides = post.slides || [];
+    const targets = Number.isFinite(onlySlide)
+      ? [Math.max(0, Math.min(slides.length - 1, onlySlide))]
+      : slides.map((_, i) => i);
+
+    for (const i of targets) {
+      const canvas = await renderPng(slides[i]);
+      const suffix = slides.length > 1 ? `_slide${i + 1}` : "";
+      await new Promise((resolve) => {
+        canvas.toBlob((blob) => {
+          downloadBlob(blob, `${base}_${Number(index) + 1}${suffix}.png`);
+          resolve();
+        });
+      });
+      await new Promise((r) => setTimeout(r, 0));
     }
   };
 
-  const downloadZip = async (generated) => {
+  const downloadZip = async (generated, options = {}) => {
+    const zipName = `${safeFilePart(options.zipName ?? "social_posts")}.zip`;
+    const base = safeFilePart(options.baseName ?? "post");
     const zip = new JSZip();
     for (const [idx, post] of Object.entries(generated)) {
       for (let i = 0; i < post.slides.length; i++) {
         const canvas = await renderPng(post.slides[i]);
         zip.file(
-          `post_${Number(idx) + 1}${post.slides.length > 1 ? `_slide${i + 1}` : ""}.png`,
+          `${base}_${Number(idx) + 1}${post.slides.length > 1 ? `_slide${i + 1}` : ""}.png`,
           canvas.toDataURL("image/png").split(",")[1],
           { base64: true },
         );
       }
     }
-    downloadBlob(await zip.generateAsync({ type: "blob" }), "social_posts.zip");
+    downloadBlob(await zip.generateAsync({ type: "blob" }), zipName);
   };
 
   return { renderPng, downloadPost, downloadZip };

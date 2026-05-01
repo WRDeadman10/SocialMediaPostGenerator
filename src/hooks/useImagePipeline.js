@@ -20,13 +20,89 @@ export const useImagePipeline = ({
 }) => {
   const [imagePicker, setImagePicker] = React.useState(null);
   const [pickerAssets, setPickerAssets] = React.useState([]);
-  const [pickerPage, setPickerPage] = React.useState(1);
+  const [pickerCursorStack, setPickerCursorStack] = React.useState([""]);
+  const pickerPage = pickerCursorStack.length;
   const [pickerTotal, setPickerTotal] = React.useState(0);
   const [pickerHasMore, setPickerHasMore] = React.useState(false);
   const [pickerLoading, setPickerLoading] = React.useState(false);
+  const [pickerSearch, setPickerSearch] = React.useState("");
+  const [pickerSearchDebounced, setPickerSearchDebounced] = React.useState("");
+  const [pickerProjectOnly, setPickerProjectOnly] = React.useState(false);
+  const listCacheRef = React.useRef(new Map());
+  const inflightRef = React.useRef(new Map());
   const [uploadLoading, setUploadLoading] = React.useState({});
   const [busyDefaultAssetId, setBusyDefaultAssetId] = React.useState("");
   const pickerUploadRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!imagePicker) return;
+    const t = window.setTimeout(() => setPickerSearchDebounced(pickerSearch.trim()), 220);
+    return () => window.clearTimeout(t);
+  }, [imagePicker, pickerSearch]);
+
+  React.useEffect(() => {
+    if (!imagePicker) return;
+    listCacheRef.current.clear();
+    inflightRef.current.clear();
+    setPickerCursorStack([""]);
+  }, [imagePicker, pickerProjectOnly, pickerSearchDebounced]);
+
+  const cacheKeyFor = React.useCallback((kind, cursor, pageSize, q, projectOnly) => (
+    `${kind}|${cursor || ""}|${pageSize}|${q || ""}|${projectOnly ? "1" : "0"}`
+  ), []);
+
+  const fetchPickerPage = React.useCallback(async ({
+    kind,
+    cursor,
+    pageSize,
+    q,
+    projectOnly,
+  }) => {
+    const key = cacheKeyFor(kind, cursor, pageSize, q, projectOnly);
+    const cached = listCacheRef.current.get(key);
+    if (cached) return cached;
+
+    const inflight = inflightRef.current.get(key);
+    if (inflight) return inflight;
+
+    const promise = postJson(fnUrl("/listAssets"), {
+      kind,
+      pageSize,
+      q,
+      projectOnly: !!projectOnly,
+      activeProjectId: projectOnly ? activeProjectId : "",
+      cursor: cursor || "",
+    }).then((data) => {
+      const raw = Array.isArray(data?.assets) ? data.assets : [];
+      const seen = new Set();
+      const deduped = [];
+      for (const asset of raw) {
+        const url = asset?.url;
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        deduped.push(asset);
+      }
+      deduped.sort((a, b) => {
+        const ap = a.projectId === activeProjectId ? 1 : 0;
+        const bp = b.projectId === activeProjectId ? 1 : 0;
+        if (ap !== bp) return bp - ap;
+        return 0;
+      });
+      const payload = {
+        assets: deduped,
+        total: Number(data?.total) || deduped.length,
+        hasMore: !!data?.hasMore,
+        nextCursor: typeof data?.nextCursor === "string" ? data.nextCursor : "",
+      };
+      listCacheRef.current.set(key, payload);
+      return payload;
+    }).finally(() => {
+      inflightRef.current.delete(key);
+    });
+
+    inflightRef.current.set(key, promise);
+    return promise;
+  }, [activeProjectId, cacheKeyFor]);
 
   const mergeClientRowsWithDefaults = React.useCallback((nextRows, defaults = assetDefaults) => {
     if (!defaults?.firstSlideImageUrl) return nextRows;
@@ -49,32 +125,28 @@ export const useImagePipeline = ({
       setPickerAssets([]);
       setPickerTotal(0);
       setPickerHasMore(false);
+      setPickerSearch("");
+      setPickerSearchDebounced("");
+      setPickerProjectOnly(false);
+      setPickerCursorStack([""]);
       return;
     }
     let cancelled = false;
     setPickerLoading(true);
     const pageSize = 10;
-    postJson(fnUrl("/listAssets"), { kind: imagePicker.kind, page: pickerPage, pageSize })
-      .then((data) => {
+    const cursor = pickerCursorStack[pickerCursorStack.length - 1] ?? "";
+    fetchPickerPage({
+      kind: imagePicker.kind,
+      cursor,
+      pageSize,
+      q: pickerSearchDebounced,
+      projectOnly: pickerProjectOnly,
+    })
+      .then((payload) => {
         if (cancelled) return;
-        const raw = Array.isArray(data?.assets) ? data.assets : [];
-        const seen = new Set();
-        const deduped = [];
-        for (const asset of raw) {
-          const url = asset?.url;
-          if (!url || seen.has(url)) continue;
-          seen.add(url);
-          deduped.push(asset);
-        }
-        deduped.sort((a, b) => {
-          const ap = a.projectId === activeProjectId ? 1 : 0;
-          const bp = b.projectId === activeProjectId ? 1 : 0;
-          if (ap !== bp) return bp - ap;
-          return 0;
-        });
-        setPickerAssets(deduped);
-        setPickerTotal(Number(data?.total) || deduped.length);
-        setPickerHasMore(!!data?.hasMore);
+        setPickerAssets(payload.assets);
+        setPickerTotal(payload.total);
+        setPickerHasMore(payload.hasMore);
       })
       .catch((e) => {
         if (!cancelled) showToast(e.message || "Could not load image library");
@@ -83,7 +155,7 @@ export const useImagePipeline = ({
         if (!cancelled) setPickerLoading(false);
       });
     return () => { cancelled = true; };
-  }, [activeProjectId, imagePicker, pickerPage, showToast]);
+  }, [activeProjectId, fetchPickerPage, imagePicker, pickerCursorStack, pickerProjectOnly, pickerSearchDebounced, showToast]);
 
   const storeImageAsset = React.useCallback(async (file, kind, loadingKey = "") => {
     if (!file) return "";
@@ -114,15 +186,65 @@ export const useImagePipeline = ({
       showToast("Create or load a project first");
       return;
     }
-    setPickerPage(1);
+    setPickerSearch("");
+    setPickerSearchDebounced("");
+    setPickerProjectOnly(false);
+    setPickerCursorStack([""]);
     setImagePicker(payload);
   }, [activeProjectId, showToast]);
+
+  const handlePickerPageChange = React.useCallback((nextPage) => {
+    if (!imagePicker) return;
+
+    const currentPage = pickerCursorStack.length;
+    if (nextPage < currentPage) {
+      setPickerCursorStack((prev) => (prev.length <= 1 ? prev : prev.slice(0, -1)));
+      return;
+    }
+
+    if (nextPage <= currentPage) return;
+
+    const cursor = pickerCursorStack[pickerCursorStack.length - 1] ?? "";
+    const pageSize = 10;
+    setPickerLoading(true);
+    fetchPickerPage({
+      kind: imagePicker.kind,
+      cursor,
+      pageSize,
+      q: pickerSearchDebounced,
+      projectOnly: pickerProjectOnly,
+    })
+      .then((payload) => {
+        if (!payload.nextCursor) {
+          showToast("No further pages available");
+          return;
+        }
+        setPickerCursorStack((prev) => [...prev, payload.nextCursor]);
+      })
+      .catch((e) => showToast(e.message || "Could not load next page"))
+      .finally(() => setPickerLoading(false));
+  }, [fetchPickerPage, imagePicker, pickerCursorStack, pickerProjectOnly, pickerSearchDebounced, showToast]);
+
+  const handlePrefetchNext = React.useCallback(() => {
+    if (!imagePicker) return;
+    const cursor = pickerCursorStack[pickerCursorStack.length - 1] ?? "";
+    const pageSize = 10;
+    fetchPickerPage({
+      kind: imagePicker.kind,
+      cursor,
+      pageSize,
+      q: pickerSearchDebounced,
+      projectOnly: pickerProjectOnly,
+    }).catch(() => {});
+  }, [fetchPickerPage, imagePicker, pickerCursorStack, pickerProjectOnly, pickerSearchDebounced]);
 
   const handlePickerUpload = React.useCallback(async (file) => {
     if (!file || !imagePicker) return;
     try {
       const url = await storeImageAsset(file, imagePicker.kind, `picker:${imagePicker.kind}`);
       if (!url) return;
+      listCacheRef.current.clear();
+      inflightRef.current.clear();
       await imagePicker.applyUrl(url, file.name);
       if (pickerUploadRef.current) pickerUploadRef.current.value = "";
       setImagePicker(null);
@@ -188,10 +310,16 @@ export const useImagePipeline = ({
     setImagePicker,
     pickerAssets,
     pickerPage,
-    setPickerPage,
+    setPickerPage: handlePickerPageChange,
     pickerTotal,
     pickerHasMore,
+    pickerHasPrev: pickerPage > 1,
     pickerLoading,
+    pickerSearch,
+    setPickerSearch,
+    pickerProjectOnly,
+    setPickerProjectOnly,
+    handlePrefetchNext,
     uploadLoading,
     busyDefaultAssetId,
     pickerUploadRef,

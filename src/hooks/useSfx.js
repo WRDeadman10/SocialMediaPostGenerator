@@ -1,11 +1,44 @@
 import React from "react";
 
+const STORAGE_KEY = "smpg:sfxMuted";
+
+const readMuted = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+const prefersReducedMotion = () => typeof window !== "undefined"
+  && !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+
 export const useSfx = () => {
   const audioCtxRef = React.useRef(null);
+  const [muted, setMutedState] = React.useState(readMuted);
 
-  return React.useCallback((type) => {
+  React.useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+    const onStorage = (e) => {
+      if (e.key === STORAGE_KEY) setMutedState(readMuted());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const setMuted = React.useCallback((next) => {
+    setMutedState(!!next);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+    } catch {
+      // ignore quota / private mode
+    }
+  }, []);
+
+  const play = React.useCallback((type) => {
+    if (typeof window === "undefined") return;
+    if (muted || prefersReducedMotion()) return;
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) return;
@@ -47,5 +80,7 @@ export const useSfx = () => {
     } catch {
       // Ignore audio failures (autoplay policy, unsupported, etc.)
     }
-  }, []);
+  }, [muted]);
+
+  return { play, muted, setMuted };
 };

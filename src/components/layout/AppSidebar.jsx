@@ -29,8 +29,11 @@ export const AppSidebar = ({
   mergeClientConfigWithDefaults,
   handleOpenImagePicker,
   setConfigImage,
-  generateAll,
+  onGenerateAll,
+  generateBusy,
   downloadZip,
+  onApplyBrandingDefaults,
+  onResetBrandingOverrides,
 }) => (
   <aside className="sidebar">
     <Panel title="Project" defaultOpen>
@@ -67,6 +70,16 @@ export const AppSidebar = ({
         <button type="button" onClick={() => downloadTemplate("single")}>Single Template</button>
         <button type="button" onClick={() => downloadTemplate("carousel")}>Carousel Template</button>
       </div>
+    </Panel>
+    <Panel title="Branding quick actions" defaultOpen={false}>
+      <p className="hint" style={{ marginBottom: 8 }}>
+        Apply your saved defaults to this project’s config, or clear overrides to fall back to defaults / solid colors.
+      </p>
+      <div className="two" style={{ marginBottom: 8 }}>
+        <button type="button" className="btn-secondary" onClick={onApplyBrandingDefaults}>Fill from defaults</button>
+        <button type="button" className="btn-secondary" onClick={onResetBrandingOverrides}>Clear overrides</button>
+      </div>
+      <p className="hint">Defaults are edited from the image picker’s <b>Default</b> action.</p>
     </Panel>
     <Panel title="Progress">
       <div className="stats">
@@ -210,7 +223,9 @@ export const AppSidebar = ({
       </Panel>
     )}
     <Panel title="Actions">
-      <button type="button" className="btn-primary" onClick={generateAll} disabled={!rows.length}>Generate All Posts</button>
+      <button type="button" className="btn-primary" onClick={onGenerateAll} disabled={!rows.length || !!generateBusy}>
+        {generateBusy ? "Generating…" : "Generate All Posts"}
+      </button>
       <button type="button" className="btn-secondary" onClick={downloadZip} disabled={!Object.keys(generated).length}>Download All as ZIP</button>
     </Panel>
   </aside>

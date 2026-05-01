@@ -15,6 +15,7 @@ import { PostGrid } from "../components/PostGrid.jsx";
 import { AssetPickerModal } from "../components/modals/AssetPickerModal.jsx";
 import { EditModal } from "../components/modals/EditModal.jsx";
 import { NewProjectModal } from "../components/modals/NewProjectModal.jsx";
+import { FirstRunChecklist } from "../components/FirstRunChecklist.jsx";
 
 export const App = () => {
   const [config, setConfig] = React.useState(defaultConfig);
@@ -27,21 +28,42 @@ export const App = () => {
   const [hydrated, setHydrated] = React.useState(false);
   const [editing, setEditing] = React.useState(null);
   const [toast, setToast] = React.useState("");
+  const [toastTone, setToastTone] = React.useState("info");
+  const [toastAction, setToastAction] = React.useState(null);
   const [showNewProjectModal, setShowNewProjectModal] = React.useState(false);
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [animateSeed, setAnimateSeed] = React.useState(0);
+  const [generateBusy, setGenerateBusy] = React.useState(false);
+  const [genProgress, setGenProgress] = React.useState({ current: 0, total: 0 });
+  const [exportBaseName, setExportBaseName] = React.useState("social_post");
+  const [exportZipName, setExportZipName] = React.useState("social_posts");
   const renderRef = React.useRef(null);
+  const toastTimerRef = React.useRef(null);
 
-  const showToast = React.useCallback((message) => {
+  const showToast = React.useCallback((input) => {
+    const message = typeof input === "string" ? input : String(input?.message || "");
+    const tone = typeof input === "object" && input?.tone ? String(input.tone) : "info";
+    const actionLabel = typeof input === "object" && input?.actionLabel ? String(input.actionLabel) : "";
+    const onAction = typeof input === "object" ? input.onAction : null;
+
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     setToast(message);
-    setTimeout(() => setToast(""), 2600);
+    setToastTone(tone);
+    setToastAction(actionLabel && typeof onAction === "function" ? { label: actionLabel, onClick: onAction } : null);
+
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast("");
+      setToastTone("info");
+      setToastAction(null);
+      toastTimerRef.current = null;
+    }, 5200);
   }, []);
 
   const validateProjectAssets = React.useCallback((project) => {
     validateProjectAssetsLib(project, showToast);
   }, [showToast]);
 
-  const playSfx = useSfx();
+  const { play: playSfx, muted: sfxMuted, setMuted: setSfxMuted } = useSfx();
 
   const {
     imagePicker,
@@ -51,7 +73,13 @@ export const App = () => {
     setPickerPage,
     pickerTotal,
     pickerHasMore,
+    pickerHasPrev,
     pickerLoading,
+    pickerSearch,
+    setPickerSearch,
+    pickerProjectOnly,
+    setPickerProjectOnly,
+    handlePrefetchNext,
     uploadLoading,
     busyDefaultAssetId,
     pickerUploadRef,
@@ -123,6 +151,8 @@ export const App = () => {
     showToast,
     hydrated,
     editing,
+    setGenerateBusy,
+    setGenProgress,
   });
 
   React.useEffect(() => {
@@ -151,10 +181,84 @@ export const App = () => {
 
   const activeProject = projects[activeProjectId];
 
+  const hasBranding = React.useMemo(() => (
+    !!(config.bgDataUrl && String(config.bgDataUrl).trim() && config.logoDataUrl && String(config.logoDataUrl).trim())
+  ), [config.bgDataUrl, config.logoDataUrl]);
+
+  const missingBrandingBits = React.useMemo(() => {
+    const missing = [];
+    if (!config.bgDataUrl || !String(config.bgDataUrl).trim()) missing.push("background");
+    if (!config.logoDataUrl || !String(config.logoDataUrl).trim()) missing.push("logo");
+    if (String(config.postType || "").toLowerCase().includes("carousel")) {
+      if (!config.lastLogoDataUrl || !String(config.lastLogoDataUrl).trim()) missing.push("last slide logo");
+    }
+    return missing;
+  }, [config.bgDataUrl, config.logoDataUrl, config.lastLogoDataUrl, config.postType]);
+
+  const handleGenerateAll = React.useCallback(async () => {
+    if (!rows.length) return;
+    if (missingBrandingBits.length) {
+      const ok = window.confirm(
+        `Missing branding: ${missingBrandingBits.join(", ")}.\n\nGenerate anyway? (You can still edit later.)`,
+      );
+      if (!ok) return;
+    }
+    await generateAll();
+  }, [generateAll, missingBrandingBits, rows.length]);
+
+  const handleSaveEdit = React.useCallback((draft, localConfig) => {
+    if (editing == null) return;
+    const index = editing.index;
+    const snapshot = {
+      rows: rows.map((r) => ({ ...r })),
+      config: { ...config },
+      generated: { ...generated },
+    };
+
+    applyEdit(draft, localConfig);
+
+    showToast({
+      message: "Changes applied",
+      tone: "success",
+      actionLabel: "Undo",
+      onAction: () => {
+        setRows(snapshot.rows);
+        setConfig(snapshot.config);
+        setGenerated(snapshot.generated);
+        showToast({ message: "Restored previous version", tone: "info" });
+      },
+    });
+  }, [applyEdit, config, editing, generated, rows, showToast]);
+
+  const handleApplyBrandingDefaults = React.useCallback(() => {
+    const next = mergeClientConfigWithDefaults({ ...config });
+    updateConfig({
+      bgDataUrl: next.bgDataUrl,
+      logoDataUrl: next.logoDataUrl,
+      lastLogoDataUrl: next.lastLogoDataUrl,
+    });
+    showToast({ message: "Branding fields filled from defaults (where empty)", tone: "success" });
+  }, [config, mergeClientConfigWithDefaults, showToast, updateConfig]);
+
+  const handleResetBrandingOverrides = React.useCallback(() => {
+    updateConfig({ bgDataUrl: "", logoDataUrl: "", lastLogoDataUrl: "" });
+    showToast({ message: "Cleared branding image overrides for this project", tone: "info" });
+  }, [showToast, updateConfig]);
+
   return (
     <div className="shell">
       <header>
         <div className="brand"><div className="brand-icon">✦</div><div><b>Post Generator</b><span>VIITORCLOUD</span></div></div>
+        <button
+          type="button"
+          className="theme-btn"
+          onClick={() => setSfxMuted(!sfxMuted)}
+          aria-pressed={!sfxMuted}
+          aria-label={sfxMuted ? "Unmute interface sounds" : "Mute interface sounds"}
+          title={sfxMuted ? "Sound off" : "Sound on"}
+        >
+          {sfxMuted ? "🔇" : "🔊"}
+        </button>
         <button type="button" className="theme-btn" onClick={() => updateConfig({ theme: config.theme === "dark" ? "light" : "dark" })}>{config.theme === "dark" ? "☀" : "☾"}</button>
       </header>
       <div className="app">
@@ -176,28 +280,61 @@ export const App = () => {
           mergeClientConfigWithDefaults={mergeClientConfigWithDefaults}
           handleOpenImagePicker={handleOpenImagePicker}
           setConfigImage={setConfigImage}
-          generateAll={generateAll}
-          downloadZip={() => downloadZip(generated)}
+          onGenerateAll={handleGenerateAll}
+          generateBusy={generateBusy}
+          downloadZip={() => downloadZip(generated, { baseName: exportBaseName, zipName: exportZipName })}
+          onApplyBrandingDefaults={handleApplyBrandingDefaults}
+          onResetBrandingOverrides={handleResetBrandingOverrides}
         />
         <main>
           <div className="main-head">
             <div>
               <h2>Generated Posts</h2>
               <p>{activeProjectId ? `Project: ${activeProject?.name} · ${rows.length} posts ready` : "No project selected"}</p>
+              {generateBusy && genProgress.total ? (
+                <p className="gen-progress" aria-live="polite">
+                  Generating {genProgress.current}/{genProgress.total}…
+                </p>
+              ) : null}
             </div>
             <div className="actions">
-              <button type="button" onClick={generateAll} disabled={!rows.length}>Generate All Posts</button>
-              <button type="button" onClick={() => downloadZip(generated)} disabled={!Object.keys(generated).length}>Download All as ZIP</button>
+              <button type="button" onClick={handleGenerateAll} disabled={!rows.length || generateBusy}>
+                {generateBusy ? "Generating…" : "Generate All Posts"}
+              </button>
+              <button type="button" onClick={() => downloadZip(generated, { baseName: exportBaseName, zipName: exportZipName })} disabled={!Object.keys(generated).length}>
+                Download All as ZIP
+              </button>
             </div>
           </div>
+
+          <div className="export-row" aria-label="Export naming">
+            <label className="export-field">
+              <span>PNG prefix</span>
+              <input value={exportBaseName} onChange={(e) => setExportBaseName(e.target.value)} />
+            </label>
+            <label className="export-field">
+              <span>ZIP name</span>
+              <input value={exportZipName} onChange={(e) => setExportZipName(e.target.value)} />
+            </label>
+          </div>
+
+          <FirstRunChecklist
+            hydrated={hydrated}
+            activeProjectId={activeProjectId}
+            rowsLength={rows.length}
+            hasBranding={hasBranding}
+            generatedCount={Object.keys(generated).length}
+          />
+
           <PostGrid
             animateSeed={animateSeed}
             generated={generated}
             visible={visible}
             setVisible={setVisible}
-            onDownload={(idx) => downloadPost(generated, idx)}
+            onDownload={(idx, opts) => downloadPost(generated, idx, { ...opts, baseName: exportBaseName })}
             onEdit={(index) => setEditing({ index, row: generated[String(index)]?.rowData })}
             uploadLoading={uploadLoading}
+            virtualize
             onOpenFirstSlideImage={(index) => handleOpenImagePicker({
               title: `First slide image · Post #${index + 1}`,
               kind: `first-slide-${index + 1}`,
@@ -216,12 +353,14 @@ export const App = () => {
           />
         </main>
       </div>
-      {editing && <EditModal row={editing.row} config={config} onClose={() => setEditing(null)} onSave={applyEdit} />}
+      {editing && <EditModal row={editing.row} config={config} onClose={() => setEditing(null)} onSave={handleSaveEdit} />}
       {showNewProjectModal && <NewProjectModal onClose={() => setShowNewProjectModal(false)} onCreate={createNewProject} creating={creatingProject} />}
       {imagePicker && (
         <AssetPickerModal
           title={imagePicker.title}
+          pickerKind={imagePicker.kind}
           projects={projects}
+          activeProjectId={activeProjectId}
           assets={pickerAssets}
           loadingList={pickerLoading}
           loadingUpload={!!uploadLoading[`picker:${imagePicker.kind}`]}
@@ -232,7 +371,13 @@ export const App = () => {
           pageSize={10}
           total={pickerTotal}
           hasMore={pickerHasMore}
+          hasPrev={pickerHasPrev}
           onPageChange={setPickerPage}
+          onPrefetchNext={handlePrefetchNext}
+          search={pickerSearch}
+          onSearchChange={setPickerSearch}
+          projectOnly={pickerProjectOnly}
+          onProjectOnlyChange={setPickerProjectOnly}
           onClose={() => setImagePicker(null)}
           onPick={async (asset) => {
             if (!asset?.url) return;
@@ -245,7 +390,33 @@ export const App = () => {
         />
       )}
       <div ref={renderRef} className="render-area" />
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div
+          className={`toast toast-${toastTone}`}
+          role={toastTone === "error" ? "alert" : "status"}
+          aria-live={toastTone === "error" ? "assertive" : "polite"}
+          aria-atomic="true"
+        >
+          <div className="toast-row">
+            <div className="toast-msg">{toast}</div>
+            {toastAction ? (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => {
+                  toastAction.onClick?.();
+                  if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                  setToast("");
+                  setToastAction(null);
+                  setToastTone("info");
+                }}
+              >
+                {toastAction.label}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
