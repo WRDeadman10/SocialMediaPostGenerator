@@ -21,6 +21,8 @@ import { EditModal } from "../components/modals/EditModal.jsx";
 import { NewProjectModal } from "../components/modals/NewProjectModal.jsx";
 import { FirstRunChecklist } from "../components/FirstRunChecklist.jsx";
 import { getWizardStatus } from "../lib/validation.js";
+import { AnimatePresence, motion } from "framer-motion";
+import { toastVariants } from "../motion/variants.js";
 
 export const App = () => {
   const [config, setConfig] = React.useState(defaultConfig);
@@ -48,6 +50,8 @@ export const App = () => {
   const [inlineSelection, setInlineSelection] = React.useState(null);
   const [inlineDraft, setInlineDraft] = React.useState("");
   const [wizardStep, setWizardStep] = React.useState("upload");
+  const [leftOpen, setLeftOpen] = React.useState(true);
+  const [rightOpen, setRightOpen] = React.useState(true);
   const renderRef = React.useRef(null);
   const toastTimerRef = React.useRef(null);
 
@@ -384,6 +388,16 @@ export const App = () => {
               <button
                 type="button"
                 className="theme-btn"
+                onClick={() => setLeftOpen((v) => !v)}
+                aria-pressed={leftOpen}
+                aria-label={leftOpen ? "Collapse left panel" : "Expand left panel"}
+                title={leftOpen ? "Collapse left panel" : "Expand left panel"}
+              >
+                ⟨
+              </button>
+              <button
+                type="button"
+                className="theme-btn"
                 onClick={() => setSfxMuted(!sfxMuted)}
                 aria-pressed={!sfxMuted}
                 aria-label={sfxMuted ? "Unmute interface sounds" : "Mute interface sounds"}
@@ -399,9 +413,21 @@ export const App = () => {
               >
                 {config.theme === "dark" ? "☀" : "☾"}
               </button>
+              <button
+                type="button"
+                className="theme-btn"
+                onClick={() => setRightOpen((v) => !v)}
+                aria-pressed={rightOpen}
+                aria-label={rightOpen ? "Collapse right panel" : "Expand right panel"}
+                title={rightOpen ? "Collapse right panel" : "Expand right panel"}
+              >
+                ⟩
+              </button>
             </div>
           </>
         )}
+        leftOpen={leftOpen}
+        rightOpen={rightOpen}
         left={(
           <ConfigWorkspace
             projects={projects}
@@ -518,33 +544,40 @@ export const App = () => {
         />
       )}
       <div ref={renderRef} className="render-area" />
-      {toast && (
-        <div
-          className={`toast toast-${toastTone}`}
-          role={toastTone === "error" ? "alert" : "status"}
-          aria-live={toastTone === "error" ? "assertive" : "polite"}
-          aria-atomic="true"
-        >
-          <div className="toast-row">
-            <div className="toast-msg">{toast}</div>
-            {toastAction ? (
-              <button
-                type="button"
-                className="toast-action"
-                onClick={() => {
-                  toastAction.onClick?.();
-                  if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-                  setToast("");
-                  setToastAction(null);
-                  setToastTone("info");
-                }}
-              >
-                {toastAction.label}
-              </button>
-            ) : null}
-          </div>
-        </div>
-      )}
+      <AnimatePresence mode="wait" initial={false}>
+        {toast ? (
+          <motion.div
+            key="toast"
+            className={`toast toast-${toastTone}`}
+            role={toastTone === "error" ? "alert" : "status"}
+            aria-live={toastTone === "error" ? "assertive" : "polite"}
+            aria-atomic="true"
+            variants={toastVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+          >
+            <div className="toast-row">
+              <div className="toast-msg">{toast}</div>
+              {toastAction ? (
+                <button
+                  type="button"
+                  className="toast-action"
+                  onClick={() => {
+                    toastAction.onClick?.();
+                    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+                    setToast("");
+                    setToastAction(null);
+                    setToastTone("info");
+                  }}
+                >
+                  {toastAction.label}
+                </button>
+              ) : null}
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 };

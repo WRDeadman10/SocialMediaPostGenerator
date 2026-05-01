@@ -12,12 +12,12 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",
+    "framer-motion": "^12.38.0",
     "html2canvas": "^1.4.1",
     "jszip": "^3.10.1",
-    "vite": "^7.3.0",
-    "xlsx": "^0.18.5",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
-  },
-  "devDependencies": {}
+    "react-dom": "^19.2.3",
+    "vite": "^7.3.0",
+    "xlsx": "^0.18.5"
+  }
 }

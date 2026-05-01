@@ -1,4 +1,6 @@
 import React from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { popVariants } from "../../motion/variants.js";
 
 const isMultiLineField = (kind, field) => {
   if (kind !== "row") return false;
@@ -51,33 +53,45 @@ export const InlineTextEditor = ({
   };
 
   return (
-    <div className="inline-editor" style={style} role="dialog" aria-label="Inline text editor">
-      {multi ? (
-        <textarea
-          ref={inputRef}
-          className="inline-editor-input"
-          value={value}
-          onChange={(e) => onChange?.(e.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={Math.max(3, Math.min(10, Math.round((rect.height + 16) / 24)))}
-        />
-      ) : (
-        <input
-          ref={inputRef}
-          className="inline-editor-input"
-          value={value}
-          onChange={(e) => onChange?.(e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-      )}
-      <div className="inline-editor-actions">
-        <button type="button" className="inline-btn" onClick={onCancel}>Cancel</button>
-        <button type="button" className="inline-btn primary" onClick={onCommit}>Apply</button>
-      </div>
-      <div className="inline-editor-hint" aria-hidden="true">
-        {multi ? "Cmd/Ctrl+Enter to apply · Esc to cancel" : "Enter to apply · Esc to cancel"}
-      </div>
-    </div>
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={`${selection.kind}:${selection.field}:${selection.postIndex ?? ""}:${selection.slideIndex ?? ""}`}
+        className="inline-editor"
+        style={style}
+        role="dialog"
+        aria-label="Inline text editor"
+        variants={popVariants}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+      >
+        {multi ? (
+          <textarea
+            ref={inputRef}
+            className="inline-editor-input"
+            value={value}
+            onChange={(e) => onChange?.(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={Math.max(3, Math.min(10, Math.round((rect.height + 16) / 24)))}
+          />
+        ) : (
+          <input
+            ref={inputRef}
+            className="inline-editor-input"
+            value={value}
+            onChange={(e) => onChange?.(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        )}
+        <div className="inline-editor-actions">
+          <button type="button" className="inline-btn" onClick={onCancel}>Cancel</button>
+          <button type="button" className="inline-btn primary" onClick={onCommit}>Apply</button>
+        </div>
+        <div className="inline-editor-hint" aria-hidden="true">
+          {multi ? "Cmd/Ctrl+Enter to apply · Esc to cancel" : "Enter to apply · Esc to cancel"}
+        </div>
+      </motion.div>
+    </AnimatePresence>
   );
 };
 

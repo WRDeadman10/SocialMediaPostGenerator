@@ -1,5 +1,8 @@
 import React from "react";
 import { Preview } from "../Preview.jsx";
+import { AnimatePresence, motion } from "framer-motion";
+import { useCanvasTransform } from "../../motion/hooks/useCanvasTransform.js";
+import { popVariants } from "../../motion/variants.js";
 
 const ARTBOARD_W = 800;
 const ARTBOARD_H = 1000;
@@ -25,13 +28,23 @@ export const CanvasEditor = ({
 }) => {
   const stageRef = React.useRef(null);
   const pageRef = React.useRef(null);
-  const [zoom, setZoom] = React.useState(1);
-  const [pan, setPan] = React.useState({ x: 0, y: 0 });
-  const panRef = React.useRef(pan);
-  const zoomRef = React.useRef(zoom);
-
-  React.useEffect(() => { panRef.current = pan; }, [pan]);
-  React.useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  const {
+    renderZoom,
+    renderPan,
+    setTargetZoom,
+    setTargetPan,
+    nudgeTargetPan,
+    beginDrag,
+    dragTo,
+    endDrag,
+  } = useCanvasTransform({
+    initialZoom: 1,
+    initialPan: { x: 0, y: 0 },
+    minZoom: 0.2,
+    maxZoom: 3.2,
+    lerp: 0.18,
+    inertia: { enabled: true, decay: 0.92, stopSpeed: 0.18 },
+  });
 
   const computeCenteredPan = React.useCallback((scale) => {
     const stage = stageRef.current;
@@ -59,8 +72,8 @@ export const CanvasEditor = ({
     const maxW = Math.max(1, rect.width - padding);
     const maxH = Math.max(1, rect.height - padding);
     const scale = Math.max(0.2, Math.min(3, Math.min(maxW / ARTBOARD_W, maxH / ARTBOARD_H)));
-    setZoom(scale);
-    setPan(computeCenteredPan(scale));
+    setTargetZoom(scale);
+    setTargetPan(computeCenteredPan(scale));
   }, [computeCenteredPan]);
 
   React.useEffect(() => {
@@ -72,22 +85,26 @@ export const CanvasEditor = ({
     const stage = stageRef.current;
     if (!stage || typeof ResizeObserver === "undefined") return undefined;
     const ro = new ResizeObserver(() => {
-      setPan(computeCenteredPan(zoomRef.current));
+      setTargetPan(computeCenteredPan(renderZoom));
     });
     ro.observe(stage);
     return () => ro.disconnect();
   }, [computeCenteredPan]);
 
   const handleZoomOut = React.useCallback(() => {
-    const next = Math.max(0.2, zoomRef.current - 0.1);
-    setZoom(next);
-    setPan(computeCenteredPan(next));
+    setTargetZoom((z) => {
+      const next = Math.max(0.2, z - 0.1);
+      queueMicrotask(() => setTargetPan(computeCenteredPan(next)));
+      return next;
+    });
   }, [computeCenteredPan]);
 
   const handleZoomIn = React.useCallback(() => {
-    const next = Math.min(3.2, zoomRef.current + 0.1);
-    setZoom(next);
-    setPan(computeCenteredPan(next));
+    setTargetZoom((z) => {
+      const next = Math.min(3.2, z + 0.1);
+      queueMicrotask(() => setTargetPan(computeCenteredPan(next)));
+      return next;
+    });
   }, [computeCenteredPan]);
 
   const handleWheel = React.useCallback((e) => {
@@ -97,11 +114,11 @@ export const CanvasEditor = ({
     e.preventDefault();
     const delta = -e.deltaY;
     const step = Math.abs(delta) > 24 ? 0.12 : 0.06;
-    const prev = zoomRef.current;
-    const next = Math.max(0.2, Math.min(3.2, prev + (delta > 0 ? step : -step)));
-    if (next === prev) return;
-    setZoom(next);
-    setPan(computeCenteredPan(next));
+    setTargetZoom((prev) => {
+      const next = Math.max(0.2, Math.min(3.2, prev + (delta > 0 ? step : -step)));
+      queueMicrotask(() => setTargetPan(computeCenteredPan(next)));
+      return next;
+    });
   }, [computeCenteredPan]);
 
   const handlePointerDown = React.useCallback((e) => {
@@ -110,18 +127,18 @@ export const CanvasEditor = ({
     if (!(e.target instanceof HTMLElement)) return;
     if (!e.target.closest(".canvas-stage")) return;
     if (e.target.closest(".canvas-page")) return;
-    const start = { x: e.clientX, y: e.clientY };
-    const base = panRef.current;
+    beginDrag(e.clientX, e.clientY);
     const move = (ev) => {
-      setPan({ x: base.x + (ev.clientX - start.x), y: base.y + (ev.clientY - start.y) });
+      dragTo(ev.clientX, ev.clientY);
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      endDrag();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-  }, []);
+  }, [beginDrag, dragTo, endDrag]);
 
   const slides = post?.slides || [];
   const current = Math.max(0, Math.min(slides.length - 1, activeSlideIndex || 0));
@@ -130,6 +147,14 @@ export const CanvasEditor = ({
   const isCarousel = postType === "carousel";
   const busyFirstSlide = !!uploadLoading?.[`card:first-slide:${activePostIndex}`];
   const hasRow = activePostIndex != null && !!post?.rowData;
+  const prevSlideRef = React.useRef(activeSlideIndex || 0);
+  const [slideDir, setSlideDir] = React.useState(1);
+
+  React.useEffect(() => {
+    const prev = prevSlideRef.current;
+    prevSlideRef.current = activeSlideIndex || 0;
+    setSlideDir((activeSlideIndex || 0) >= prev ? 1 : -1);
+  }, [activeSlideIndex]);
 
   const handleCanvasClick = React.useCallback((e) => {
     if (!onInlineEditRequest) return;
@@ -217,11 +242,22 @@ export const CanvasEditor = ({
       >
         <div
           className="canvas-transform"
-          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+          style={{ transform: `translate(${renderPan.x}px, ${renderPan.y}px) scale(${renderZoom})` }}
         >
           <div ref={pageRef} className="canvas-page" onClick={handleCanvasClick}>
             <div className="canvas-page-inner">
-              <Preview html={html} />
+              <AnimatePresence mode="popLayout" initial={false}>
+                <motion.div
+                  key={`${activePostIndex}:${current}`}
+                  className="canvas-slide"
+                  initial={{ opacity: 0, x: 18 * slideDir }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -18 * slideDir }}
+                  transition={popVariants.animate.transition}
+                >
+                  <Preview html={html} />
+                </motion.div>
+              </AnimatePresence>
             </div>
           </div>
         </div>
