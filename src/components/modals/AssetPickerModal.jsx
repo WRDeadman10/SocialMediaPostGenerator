@@ -71,6 +71,7 @@ export const AssetPickerModal = ({
   onUploadFile,
   onSetDefault,
 }) => {
+  const [activeTab, setActiveTab] = React.useState("generate");
   const [hoverHighUrl, setHoverHighUrl] = React.useState("");
   const [navIndex, setNavIndex] = React.useState(0);
   const initialFocusRef = React.useRef(null);
@@ -213,165 +214,281 @@ export const AssetPickerModal = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        style={activeTab === "generate" ? { width: "min(800px, 94vw)" } : {}}
       >
-        <div className="dialog-head asset-dialog-head">
-          <h2 id={titleId}>{title}</h2>
-          <div className="asset-dialog-head-right">
-            {defaultPreviewUrl ? (
-              <div className="asset-default-corner" title="Current default for new rows / all projects">
-                <span className="asset-default-corner-label">Default</span>
-                <div
-                  className="asset-default-corner-thumb"
-                  style={{ backgroundImage: `url(${defaultPreviewUrl})` }}
-                  role="img"
-                  aria-label="Default image for this slot"
+        <div className="dialog-head asset-dialog-head" style={{ flexDirection: "column", alignItems: "stretch", gap: "14px" }}>
+          <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: "8px", marginBottom: 0 }}>
+              <button
+                type="button"
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: activeTab === "generate" ? "1px solid var(--accent)" : "1px solid var(--border)",
+                  background: activeTab === "generate" ? "var(--accent)" : "var(--surface2)",
+                  color: activeTab === "generate" ? "#fff" : "var(--muted)",
+                  fontWeight: "600",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap"
+                }}
+                onClick={() => setActiveTab("generate")}
+              >
+                Generate
+              </button>
+              <button
+                type="button"
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: activeTab === "upload" ? "1px solid var(--accent)" : "1px solid var(--border)",
+                  background: activeTab === "upload" ? "var(--accent)" : "var(--surface2)",
+                  color: activeTab === "upload" ? "#fff" : "var(--muted)",
+                  fontWeight: "600",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap"
+                }}
+                onClick={() => setActiveTab("upload")}
+              >
+                Upload
+              </button>
+            </div>
+            <div className="asset-dialog-head-right">
+              {defaultPreviewUrl ? (
+                <div className="asset-default-corner" title="Current default for new rows / all projects">
+                  <span className="asset-default-corner-label">Default</span>
+                  <div
+                    className="asset-default-corner-thumb"
+                    style={{ backgroundImage: `url(${defaultPreviewUrl})` }}
+                    role="img"
+                    aria-label="Default image for this slot"
+                  />
+                </div>
+              ) : null}
+              <button ref={closeRef} type="button" className="asset-dialog-close" onClick={onClose} aria-label="Close image picker">
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {activeTab === "upload" && (
+          <div className="dialog-body asset-body">
+            <input ref={uploadInputRef} hidden type="file" accept="image/*" onChange={handleUploadInputChange} />
+            <div className="asset-toolbar">
+              <label className="asset-search">
+                <span className="sr-only">Search library</span>
+                <input
+                  value={search}
+                  onChange={(e) => onSearchChange?.(e.target.value)}
+                  placeholder="Search by file name…"
+                  aria-label="Search assets by file name"
+                />
+              </label>
+              <label className="asset-filter-toggle">
+                <input
+                  type="checkbox"
+                  checked={!!projectOnly}
+                  onChange={(e) => onProjectOnlyChange?.(e.target.checked)}
+                />
+                <span>This project only</span>
+              </label>
+            </div>
+            {recents.length > 0 && (
+              <div className="asset-recents" aria-label="Recently used images">
+                <div className="asset-recents-label">Recent</div>
+                <div className="asset-recents-row">
+                  {recents.map((r) => (
+                    <button
+                      type="button"
+                      key={`${r.kind}:${r.url}`}
+                      className="asset-recent-chip"
+                      style={{ backgroundImage: `url(${r.thumbUrl || r.url})` }}
+                      title={r.fileName || "Recent"}
+                      aria-label={`Recent image ${r.fileName || ""}`}
+                      onClick={() => onPick({ url: r.url, thumbUrl: r.thumbUrl || r.url, fileName: r.fileName, projectId: r.projectId, id: r.id })}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="asset-hover-preview-bar" aria-live="polite">
+              {hoverHighUrl ? (
+                <img className="asset-hover-preview-img" src={hoverHighUrl} alt="" decoding="async" />
+              ) : (
+                <span className="asset-preview-placeholder">Hover or focus a card to preview full resolution</span>
+              )}
+            </div>
+            <div
+              ref={gridRef}
+              className="asset-picker-grid"
+              onPointerLeave={handlePointerLeaveGrid}
+              onKeyDown={handleGridKeyDown}
+            >
+              <button
+                ref={(el) => {
+                  itemRefs.current[0] = el;
+                  initialFocusRef.current = el;
+                }}
+                type="button"
+                className="asset-upload-card"
+                tabIndex={navIndex === 0 ? 0 : -1}
+                onFocus={() => { setNavIndex(0); setHoverHighUrl(""); }}
+                onClick={onUploadClick}
+                disabled={loadingUpload}
+                aria-busy={loadingUpload}
+                aria-label={loadingUpload ? "Uploading image" : "Upload new image"}
+              >
+                <span className="asset-upload-plus" aria-hidden="true">+</span>
+                <span className="asset-upload-label">{loadingUpload ? "Uploading…" : "Upload new"}</span>
+              </button>
+              {!loadingList && assets.map((asset, i) => {
+                const idx = i + 1;
+                const label = `Use image ${asset.fileName || "untitled"} from ${projectNameFromId(projects, asset.projectId)}`;
+                const isCurrentProject = !!activeProjectId && asset.projectId === activeProjectId;
+                return (
+                  <div
+                    key={asset.id || asset.url}
+                    className={`asset-inventory-card ${isCurrentProject ? "asset-inventory-card-current" : ""}`}
+                    onPointerEnter={() => handlePointerEnterAsset(asset)}
+                  >
+                    <button
+                      ref={(el) => { itemRefs.current[idx] = el; }}
+                      type="button"
+                      tabIndex={navIndex === idx ? 0 : -1}
+                      className="asset-inventory-thumb"
+                      style={{ backgroundImage: `url(${listThumbUrl(asset)})` }}
+                      aria-label={label}
+                      onFocus={() => { setNavIndex(idx); handlePointerEnterAsset(asset); }}
+                      onClick={() => handlePick(asset)}
+                    />
+                    <button
+                      type="button"
+                      className="asset-default-fab"
+                      disabled={busyAssetId === asset.id}
+                      onClick={(e) => { e.stopPropagation(); onSetDefault?.(asset); }}
+                      aria-label={`Set ${asset.fileName || "image"} as default`}
+                    >
+                      {busyAssetId === asset.id ? "…" : "★"}
+                    </button>
+                    <div className="asset-inventory-meta">
+                      <small title={asset.fileName || ""}>{projectNameFromId(projects, asset.projectId)}</small>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {loadingList && <div className="asset-loading">Loading library…</div>}
+            {!loadingList && !assets.length && (
+              <p className="asset-empty-note">No images found for this slot yet. Use the + card to upload.</p>
+            )}
+            <div className="asset-pagination">
+              <button
+                type="button"
+                className="asset-page-btn"
+                disabled={!hasPrev || loadingList}
+                onClick={() => onPageChange?.(page - 1)}
+              >
+                Previous
+              </button>
+              <span className="asset-page-info">
+                Page {page} of {totalPages}
+                {total > 0 ? ` · ${total} total` : ""}
+              </span>
+              <button
+                type="button"
+                className="asset-page-btn"
+                disabled={!hasMore || loadingList}
+                onClick={() => onPageChange?.(page + 1)}
+                onMouseEnter={() => onPrefetchNext?.()}
+                onFocus={() => onPrefetchNext?.()}
+              >
+                Next
+              </button>
+            </div>
+            <p className="asset-kb-hint" aria-hidden="true">
+              Keys: arrows move · Enter picks · D default · U upload · N/P pages
+            </p>
+          </div>
+        )}
+
+        {activeTab === "generate" && (
+          <div className="dialog-body" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", padding: "20px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ flex: 1, minHeight: "340px", border: "1px solid var(--border)", borderRadius: "12px", background: "var(--surface2)", padding: "16px", display: "flex", flexDirection: "column" }}>
+                <textarea 
+                  placeholder="Enter prompt to generate image..."
+                  style={{
+                    flex: 1,
+                    width: "100%",
+                    resize: "none",
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--text)",
+                    outline: "none",
+                    fontSize: "14px",
+                    fontFamily: "inherit"
+                  }}
                 />
               </div>
-            ) : null}
-            <button ref={closeRef} type="button" className="asset-dialog-close" onClick={onClose} aria-label="Close image picker">
-              ×
-            </button>
-          </div>
-        </div>
-        <div className="dialog-body asset-body">
-          <input ref={uploadInputRef} hidden type="file" accept="image/*" onChange={handleUploadInputChange} />
-          <div className="asset-toolbar">
-            <label className="asset-search">
-              <span className="sr-only">Search library</span>
-              <input
-                value={search}
-                onChange={(e) => onSearchChange?.(e.target.value)}
-                placeholder="Search by file name…"
-                aria-label="Search assets by file name"
-              />
-            </label>
-            <label className="asset-filter-toggle">
-              <input
-                type="checkbox"
-                checked={!!projectOnly}
-                onChange={(e) => onProjectOnlyChange?.(e.target.checked)}
-              />
-              <span>This project only</span>
-            </label>
-          </div>
-          {recents.length > 0 && (
-            <div className="asset-recents" aria-label="Recently used images">
-              <div className="asset-recents-label">Recent</div>
-              <div className="asset-recents-row">
-                {recents.map((r) => (
-                  <button
-                    type="button"
-                    key={`${r.kind}:${r.url}`}
-                    className="asset-recent-chip"
-                    style={{ backgroundImage: `url(${r.thumbUrl || r.url})` }}
-                    title={r.fileName || "Recent"}
-                    aria-label={`Recent image ${r.fileName || ""}`}
-                    onClick={() => onPick({ url: r.url, thumbUrl: r.thumbUrl || r.url, fileName: r.fileName, projectId: r.projectId, id: r.id })}
-                  />
-                ))}
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <button type="button" className="btn-primary" style={{ width: "auto", minWidth: "120px", padding: "10px 24px", margin: 0 }}>
+                  Generate
+                </button>
+                <select 
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface2)",
+                    color: "var(--text)",
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    outline: "none"
+                  }}
+                >
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="codex">Codex</option>
+                </select>
               </div>
             </div>
-          )}
-          <div className="asset-hover-preview-bar" aria-live="polite">
-            {hoverHighUrl ? (
-              <img className="asset-hover-preview-img" src={hoverHighUrl} alt="" decoding="async" />
-            ) : (
-              <span className="asset-preview-placeholder">Hover or focus a card to preview full resolution</span>
-            )}
-          </div>
-          <div
-            ref={gridRef}
-            className="asset-picker-grid"
-            onPointerLeave={handlePointerLeaveGrid}
-            onKeyDown={handleGridKeyDown}
-          >
-            <button
-              ref={(el) => {
-                itemRefs.current[0] = el;
-                initialFocusRef.current = el;
-              }}
-              type="button"
-              className="asset-upload-card"
-              tabIndex={navIndex === 0 ? 0 : -1}
-              onFocus={() => { setNavIndex(0); setHoverHighUrl(""); }}
-              onClick={onUploadClick}
-              disabled={loadingUpload}
-              aria-busy={loadingUpload}
-              aria-label={loadingUpload ? "Uploading image" : "Upload new image"}
-            >
-              <span className="asset-upload-plus" aria-hidden="true">+</span>
-              <span className="asset-upload-label">{loadingUpload ? "Uploading…" : "Upload new"}</span>
-            </button>
-            {!loadingList && assets.map((asset, i) => {
-              const idx = i + 1;
-              const label = `Use image ${asset.fileName || "untitled"} from ${projectNameFromId(projects, asset.projectId)}`;
-              const isCurrentProject = !!activeProjectId && asset.projectId === activeProjectId;
-              return (
-                <div
-                  key={asset.id || asset.url}
-                  className={`asset-inventory-card ${isCurrentProject ? "asset-inventory-card-current" : ""}`}
-                  onPointerEnter={() => handlePointerEnterAsset(asset)}
-                >
-                  <button
-                    ref={(el) => { itemRefs.current[idx] = el; }}
-                    type="button"
-                    tabIndex={navIndex === idx ? 0 : -1}
-                    className="asset-inventory-thumb"
-                    style={{ backgroundImage: `url(${listThumbUrl(asset)})` }}
-                    aria-label={label}
-                    onFocus={() => { setNavIndex(idx); handlePointerEnterAsset(asset); }}
-                    onClick={() => handlePick(asset)}
-                  />
-                  <button
-                    type="button"
-                    className="asset-default-fab"
-                    disabled={busyAssetId === asset.id}
-                    onClick={(e) => { e.stopPropagation(); onSetDefault?.(asset); }}
-                    aria-label={`Set ${asset.fileName || "image"} as default`}
-                  >
-                    {busyAssetId === asset.id ? "…" : "★"}
-                  </button>
-                  <div className="asset-inventory-meta">
-                    <small title={asset.fileName || ""}>{projectNameFromId(projects, asset.projectId)}</small>
-                  </div>
+            <div style={{ border: "1px solid var(--border)", borderRadius: "12px", background: "var(--surface2)", display: "flex", flexDirection: "column", padding: "20px" }}>
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ color: "var(--muted2)", fontSize: "13px", fontWeight: "600", textAlign: "center" }}>
+                  Generated Image placeholder
                 </div>
-              );
-            })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+                <button type="button" className="btn-primary" style={{ padding: "8px 20px", width: "auto" }}>Select</button>
+              </div>
+            </div>
           </div>
-          {loadingList && <div className="asset-loading">Loading library…</div>}
-          {!loadingList && !assets.length && (
-            <p className="asset-empty-note">No images found for this slot yet. Use the + card to upload.</p>
+        )}
+
+        <div className="dialog-foot asset-dialog-foot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          {activeTab === "generate" ? (
+            <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingRight: "16px", flex: 1, alignItems: "center" }}>
+              {/* Thumbnails placeholder */}
+              {[1, 2, 3, 4, 5].map(i => (
+                <div 
+                  key={i} 
+                  style={{ 
+                    width: "56px", 
+                    height: "36px", 
+                    flexShrink: 0, 
+                    background: "var(--surface3)", 
+                    border: i === 1 ? "2px solid var(--accent)" : "1px solid var(--border)", 
+                    borderRadius: "6px",
+                    cursor: "pointer"
+                  }} 
+                />
+              ))}
+            </div>
+          ) : (
+            <div />
           )}
-          <div className="asset-pagination">
-            <button
-              type="button"
-              className="asset-page-btn"
-              disabled={!hasPrev || loadingList}
-              onClick={() => onPageChange?.(page - 1)}
-            >
-              Previous
-            </button>
-            <span className="asset-page-info">
-              Page {page} of {totalPages}
-              {total > 0 ? ` · ${total} total` : ""}
-            </span>
-            <button
-              type="button"
-              className="asset-page-btn"
-              disabled={!hasMore || loadingList}
-              onClick={() => onPageChange?.(page + 1)}
-              onMouseEnter={() => onPrefetchNext?.()}
-              onFocus={() => onPrefetchNext?.()}
-            >
-              Next
-            </button>
-          </div>
-          <p className="asset-kb-hint" aria-hidden="true">
-            Keys: arrows move · Enter picks · D default · U upload · N/P pages
-          </p>
-        </div>
-        <div className="dialog-foot asset-dialog-foot">
-          <button type="button" onClick={onClose}>Close</button>
+          <button type="button" onClick={onClose} style={{ flexShrink: 0 }}>Close</button>
         </div>
       </div>
     </div>
