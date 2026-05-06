@@ -12,7 +12,8 @@ Generate branded single-post and carousel images from Excel data. Built with Rea
   - Right: outputs list + batch export tools
 - Generate single posts or 6-slide carousels with live preview
 - Upload background, logo, last-slide logo, and per-row first-slide images (Firebase Storage)
-- **Asset library modal:** paginated inventory (10 per page), default preview in the header, low-res thumbnails in the grid, full-resolution preview on hover/focus, “Upload new” as the first card
+- **Asset library modal:** paginated inventory (10 per page), default preview in the header, low-res thumbnails in the grid, full-resolution preview on hover/focus, "Upload new" as the first card, and a new **"Generate" tab** for AI image generation with model selection (Claude, Gemini, Codex) and an interactive thumbnail gallery.
+- **Desktop Application (Tauri):** Wrapped with Tauri to build native Windows executables (requires Rust and MSVC tools).
 - **Storage layout (new uploads):** images are stored under typed folders per project — `assets/logo/`, `assets/background/`, `assets/last-slide-logo/`, `assets/first-slide-image/` (legacy flat `assets/` files are still listed)
 - Client-generated **JPEG thumbnails** on upload; listings prefer `thumbUrl` when present
 - Edit post content inline (click text on the canvas to edit)
@@ -143,6 +144,19 @@ After changing Storage paths or asset APIs, redeploy functions:
 ```bash
 firebase deploy --only functions
 ```
+
+### 6. Desktop Build (Tauri)
+
+To run the desktop application locally:
+```bash
+npm run tauri dev
+```
+
+To build the executable (requires Rust and MSVC C++ build tools):
+```bash
+npm run tauri build
+```
+*(Note: If you encounter an Out of Memory (OOM) error like LNK1102 during the build process, you may need to increase your system's swap space or RAM availability.)*
 
 ## Usage
 
