@@ -52,7 +52,7 @@ fn clean_error_message(raw: &str) -> String {
     lines.join("\n")
 }
 
-/// Helper to spawn a command correctly on Windows (.cmd/.ps1) and Unix
+///// Helper to spawn a command correctly on Windows (.cmd/.ps1) and Unix
 fn spawn_command(binary: &str) -> Command {
     let mut cmd = if cfg!(windows) {
         let mut c = Command::new("cmd");
@@ -64,33 +64,29 @@ fn spawn_command(binary: &str) -> Command {
         Command::new(binary)
     };
 
-    // On Windows, global npm packages often need node.exe in the PATH
-    // We try to find where node is and ensure it's in the environment
-    if cfg!(windows) {
-        // Set Gemini trust environment variable
-        cmd.env("GEMINI_CLI_TRUST_WORKSPACE", "true");
-        
-        // Suppress global node hooks/plugins that cause "Unexpected token" errors
-        cmd.env("NODE_OPTIONS", "");
-        cmd.env("NODE_PATH", "");
-        
-        // Prevent interactive prompts
-        cmd.env("CI", "true");
+    // Common environment cleanup
+    cmd.env("GEMINI_CLI_TRUST_WORKSPACE", "true");
+    cmd.env("NODE_OPTIONS", "");
+    cmd.env("NODE_PATH", "");
+    cmd.env("CI", "true");
 
-        #[cfg(windows)]
-        let mut where_node = Command::new("where");
-        #[cfg(windows)]
-        where_node.arg("node").creation_flags(0x08000000);
+    // Platform-aware Node.js path discovery
+    let node_search = if cfg!(windows) {
+        Command::new("where").arg("node").output()
+    } else {
+        Command::new("which").arg("node").output()
+    };
 
-        if let Ok(output) = where_node.output() {
-            if let Ok(path_str) = String::from_utf8(output.stdout) {
-                if let Some(first_path) = path_str.lines().next() {
-                    if let Some(node_dir) = std::path::Path::new(first_path).parent() {
-                        let existing_path = std::env::var_os("PATH").unwrap_or_default();
-                        let mut new_path = node_dir.as_os_str().to_os_string();
-                        new_path.push(";");
-                        new_path.push(existing_path);
-                        cmd.env("PATH", new_path);
+    if let Ok(output) = node_search {
+        if let Ok(path_str) = String::from_utf8(output.stdout) {
+            if let Some(first_path) = path_str.lines().next() {
+                if let Some(node_dir) = std::path::Path::new(first_path).parent() {
+                    if let Some(existing_path) = std::env::var_os("PATH") {
+                        let mut paths = std::env::split_paths(&existing_path).collect::<Vec<_>>();
+                        paths.insert(0, node_dir.to_path_buf());
+                        if let Ok(new_path) = std::env::join_paths(paths) {
+                            cmd.env("PATH", new_path);
+                        }
                     }
                 }
             }
@@ -107,25 +103,17 @@ fn check_cli(name: String) -> CliStatus {
         "claude" => "claude",
         "codex" => "codex",
         "gemini" => "gemini",
-        _ => {
-            return CliStatus {
-                available: false,
-                version: String::new(),
-                name,
-            }
-        }
+        _ => return CliStatus { available: false, version: String::new(), name },
     };
 
-    // Primary attempt: standard shell execution
-    let mut result = spawn_command(binary)
-        .arg("--version")
-        .output();
+    // Primary attempt
+    let mut result = spawn_command(binary).arg("--version").output();
 
-    // Fallback for Windows: Use powershell to find it (Get-Command)
-    if cfg!(windows) && (result.is_err() || !result.as_ref().unwrap().status.success()) {
+    // Fallback for Windows: Use powershell if primary failed
+    #[cfg(windows)]
+    if result.is_err() || !result.as_ref().unwrap().status.success() {
         let mut ps_cmd = Command::new("powershell");
         ps_cmd.args(["-Command", &format!("{} --version", binary)]);
-        #[cfg(windows)]
         ps_cmd.creation_flags(0x08000000);
         result = ps_cmd.output();
     }
@@ -238,7 +226,8 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
     };
 
     // Fallback for Windows: Try via PowerShell if primary failed
-    if cfg!(windows) && (result.is_err() || !result.as_ref().unwrap().status.success()) {
+    #[cfg(windows)]
+    if result.is_err() || !result.as_ref().unwrap().status.success() {
         let ps_cmd = match cli.as_str() {
             "claude" => format!("claude -p \"{}\" --allowedTools \"Bash(command:*),Read,Write\" --output-format text", full_prompt.replace("\"", "`\"")),
             "codex" => format!("codex exec --quiet --approval-mode full-auto \"{}\"", full_prompt.replace("\"", "`\"")),
@@ -249,7 +238,6 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
         if !ps_cmd.is_empty() {
             let mut ps_runner = Command::new("powershell");
             ps_runner.args(["-Command", &ps_cmd]);
-            #[cfg(windows)]
             ps_runner.creation_flags(0x08000000);
 
             if let Ok(ps_result) = ps_runner.output() {

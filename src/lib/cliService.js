@@ -16,7 +16,7 @@ const CLI_TOOLS = [
     name: "Codex",
     binary: "codex",
     installCmd: "npm i -g @openai/codex",
-    authNote: "Requires OPENAI_API_KEY environment variable.\nSet it with: set OPENAI_API_KEY=sk-your-key-here",
+    authNote: "Requires OPENAI_API_KEY environment variable.\nWindows: set OPENAI_API_KEY=sk-...\nmacOS/Linux: export OPENAI_API_KEY=sk-...",
   },
   {
     id: "gemini",
@@ -86,10 +86,10 @@ export async function generateImage(cli, prompt) {
   // Use a temp directory for generated images
   let outputDir;
   try {
-    const { appDataDir } = await import("@tauri-apps/api/path");
+    const { appDataDir, sep } = await import("@tauri-apps/api/path");
     const appData = await appDataDir();
-    // Ensure trailing slash for joining
-    const separator = appData.endsWith('\\') || appData.endsWith('/') ? '' : '\\';
+    // Ensure trailing separator for joining
+    const separator = appData.endsWith(sep) ? "" : sep;
     outputDir = `${appData}${separator}generated_images`;
   } catch {
     // Fallback to a relative path
