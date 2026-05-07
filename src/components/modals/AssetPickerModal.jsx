@@ -93,6 +93,8 @@ export const AssetPickerModal = ({
   const [comfyForm, setComfyForm] = React.useState({ email: "", password: "" });
   const [isComfyConnecting, setIsComfyConnecting] = React.useState(false);
   const [comfyProgress, setComfyProgress] = React.useState({ status: "", percent: 0 });
+  const [comfyWidth, setComfyWidth] = React.useState(1080);
+  const [comfyHeight, setComfyHeight] = React.useState(1920);
   const initialFocusRef = React.useRef(null);
   const closeRef = React.useRef(null);
   const gridRef = React.useRef(null);
@@ -270,7 +272,7 @@ export const AssetPickerModal = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        style={activeTab === "generate" ? { width: "min(800px, 94vw)" } : {}}
+        style={activeTab === "generate" ? { width: "min(1000px, 96vw)" } : {}}
       >
         <div className="dialog-head asset-dialog-head" style={{ flexDirection: "column", alignItems: "stretch", gap: "14px" }}>
           <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center" }}>
@@ -479,6 +481,32 @@ export const AssetPickerModal = ({
                   disabled={isGenerating}
                 />
               </div>
+
+              {selectedCli === "comfyui" && (
+                <div className="generate-options-row">
+                  <div className="gen-option">
+                    <label>Width</label>
+                    <input
+                      type="number"
+                      value={comfyWidth}
+                      onChange={(e) => setComfyWidth(parseInt(e.target.value) || 1080)}
+                      disabled={isGenerating}
+                      className="gen-input-small"
+                    />
+                  </div>
+                  <div className="gen-option">
+                    <label>Height</label>
+                    <input
+                      type="number"
+                      value={comfyHeight}
+                      onChange={(e) => setComfyHeight(parseInt(e.target.value) || 1920)}
+                      disabled={isGenerating}
+                      style={{ width: "90px", padding: "8px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "14px" }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="generate-controls">
                 <button
                   type="button"
@@ -495,9 +523,13 @@ export const AssetPickerModal = ({
                       let imagePath = "";
 
                       if (selectedCli === "comfyui") {
-                        const localPath = await comfyService.generateImage(prompt.trim(), (status, percent) => {
-                          setComfyProgress({ status, percent });
-                        });
+                        const localPath = await comfyService.generateImage(
+                          prompt.trim(), 
+                          { width: comfyWidth, height: comfyHeight },
+                          (status, percent) => {
+                            setComfyProgress({ status, percent });
+                          }
+                        );
                         imagePath = localPath;
                         imageDataUrl = await fileToDataUrl(localPath);
                       } else {
@@ -622,7 +654,22 @@ export const AssetPickerModal = ({
               )}
             </div>
             <div className="generate-right">
-              <div className="generate-preview-area">
+              <div 
+                className="generate-preview-area"
+                style={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  justifyContent: "center", 
+                  background: "var(--surface3)", 
+                  borderRadius: "16px", 
+                  overflow: "hidden", 
+                  position: "relative", 
+                  minHeight: "500px", 
+                  maxHeight: "70vh", 
+                  border: "1px solid var(--border)",
+                  boxShadow: "inset 0 0 40px rgba(0, 0, 0, 0.2)"
+                }}
+              >
                 {isGenerating ? (
                   <div className="generate-preview-loading">
                     <div className="generate-spinner-large" aria-hidden="true" />
@@ -639,10 +686,11 @@ export const AssetPickerModal = ({
                     src={generatedImages[selectedImageIndex].dataUrl}
                     alt="Generated image preview"
                     draggable={false}
+                    style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", filter: "drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5))" }}
                   />
                 ) : (
-                  <div className="generate-preview-placeholder">
-                    <div className="generate-preview-placeholder-icon" aria-hidden="true">🎨</div>
+                  <div className="generate-preview-placeholder" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", color: "var(--muted)" }}>
+                    <div className="generate-preview-placeholder-icon" aria-hidden="true" style={{ fontSize: "48px", opacity: 0.3 }}>🎨</div>
                     <span>Generated image will appear here</span>
                   </div>
                 )}

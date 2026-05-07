@@ -107,9 +107,11 @@ export const comfyService = {
   /**
    * Queue and poll for image generation
    */
-  async generateImage(prompt, onProgress) {
+  async generateImage(prompt, options = {}, onProgress) {
     const { url, token } = this.getConnection();
     if (!url || !token) throw new Error("Not connected to ComfyUI");
+
+    const { width = 1080, height = 1920 } = options;
 
     // 1. Submit to queue
     const response = await fetch(`${url}/api/v1/generation/queue`, {
@@ -118,7 +120,12 @@ export const comfyService = {
         "Authorization": `Bearer ${token}`,
       },
       body: Body.json({
-        parameters: { prompt, seed: Math.floor(Math.random() * 1000000000000000) }
+        parameters: { 
+          prompt, 
+          seed: Math.floor(Math.random() * 1000000000000000),
+          width,
+          height
+        }
       }),
       responseType: ResponseType.JSON,
     });
