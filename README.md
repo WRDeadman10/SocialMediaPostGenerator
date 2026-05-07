@@ -13,7 +13,7 @@ Generate branded single-post and carousel images from Excel data. Built with Rea
 - Generate single posts or 6-slide carousels with live preview
 - Upload background, logo, last-slide logo, and per-row first-slide images (Firebase Storage)
 - **Asset library modal:** paginated inventory (10 per page), default preview in the header, low-res thumbnails in the grid, full-resolution preview on hover/focus, "Upload new" as the first card, and a new **"Generate" tab** for AI image generation with model selection (Claude, Gemini, Codex) and an interactive thumbnail gallery.
-- **Desktop Application (Tauri):** Wrapped with Tauri to build native Windows executables (requires Rust and MSVC tools).
+- **Desktop Application (Tauri):** Cross-platform support for **Windows** and **macOS** (requires Rust and system build tools).
 - **AI Image Generation (Desktop Only):** Generate high-quality images directly in the Asset Picker via agentic CLI tools. Supports **Claude Code**, **Gemini CLI**, and **Codex**.
 - **Storage layout (new uploads):** images are stored under typed folders per project — `assets/logo/`, `assets/background/`, `assets/last-slide-logo/`, `assets/first-slide-image/` (legacy flat `assets/` files are still listed)
 - Client-generated **JPEG thumbnails** on upload; listings prefer `thumbUrl` when present

@@ -177,8 +177,14 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
     // Build the wrapped prompt
     let full_prompt = build_generation_prompt(&prompt, &output_path_str);
 
+    // Resolve full path for logging
+    let full_output_path = fs::canonicalize(&out_dir)
+        .unwrap_or_else(|_| out_dir.clone())
+        .join(&filename);
+    let full_output_path_str = full_output_path.to_string_lossy().to_string();
+
     println!("[CLI] Generating image with {}...", cli);
-    println!("[CLI] Output path: {}", output_path_str);
+    println!("[CLI] Output path: {}", full_output_path_str);
 
     // Build command based on CLI
     let mut result = match cli.as_str() {
@@ -254,9 +260,8 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             
             println!("[CLI] Finished with status: {}", output.status);
-            if !output.status.success() {
-                println!("[CLI] Error Output: {}", stderr);
-            }
+            println!("[CLI] Raw Stdout: {}", stdout);
+            println!("[CLI] Raw Stderr: {}", stderr);
 
             // Check if the image file was created
             if output_path.exists() {
@@ -283,13 +288,15 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
                 }
             } else {
                 // Image wasn't created — return CLI output as error context
-                let combined_err = format!("{}\n{}", stdout, stderr);
+                let combined_err = format!("STDOUT:\n{}\n\nSTDERR:\n{}", stdout, stderr);
                 let cleaned_err = clean_error_message(&combined_err);
                 
                 let error_msg = if !cleaned_err.is_empty() {
                     format!("CLI Error: {}", cleaned_err.chars().take(1000).collect::<String>())
+                } else if !combined_err.trim().is_empty() {
+                    format!("CLI Failed (Raw Output): {}", combined_err.chars().take(1000).collect::<String>())
                 } else {
-                    "CLI completed but no image was saved and no error was reported.".to_string()
+                    "CLI failed with no output captured.".to_string()
                 };
 
                 GenerateResult {
