@@ -316,9 +316,66 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
     }
 }
 
+#[tauri::command]
+async fn save_comfy_image(url: String, auth_token: String, filename: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+    
+    let mut request = client.get(&url);
+    
+    if !auth_token.is_empty() {
+        request = request.bearer_auth(auth_token);
+    }
+
+    let response = request.send().await.map_err(|e| format!("Failed to download image: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Server returned error status: {}", response.status()));
+    }
+
+    let bytes = response.bytes().await.map_err(|e| format!("Failed to read image bytes: {}", e))?;
+
+    let out_dir = PathBuf::from("generated_images");
+    if !out_dir.exists() {
+        fs::create_dir_all(&out_dir).map_err(|e| format!("Failed to create output directory: {}", e))?;
+    }
+
+    let file_path = out_dir.join(&filename);
+    fs::write(&file_path, bytes).map_err(|e| format!("Failed to save image file: {}", e))?;
+
+    let full_path = fs::canonicalize(&file_path)
+        .unwrap_or(file_path)
+        .to_string_lossy()
+        .to_string();
+
+    Ok(full_path)
+}
+
+#[tauri::command]
+async fn check_server_health(url: String) -> Result<bool, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client.get(&url).send().await;
+    
+    match response {
+        Ok(res) => Ok(res.status().is_success()),
+        Err(_) => Ok(false),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![check_cli, run_cli_generate])
+        .invoke_handler(tauri::generate_handler![
+            check_cli, 
+            run_cli_generate,
+            save_comfy_image,
+            check_server_health
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

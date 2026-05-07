@@ -25,6 +25,14 @@ const CLI_TOOLS = [
     installCmd: "npm i -g @google/gemini-cli",
     authNote: null, // Skipped for now
   },
+  {
+    id: "comfyui",
+    name: "Local ComfyUI",
+    binary: "comfyui", // Not used for API types
+    type: "api",
+    installCmd: "http://localhost:8000",
+    authNote: "Connect to your local ComfyUI Orchestration Server.",
+  },
 ];
 
 /** Check if running inside Tauri */

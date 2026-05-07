@@ -19,6 +19,15 @@
         "execute": false,
         "sidecar": false,
         "scope": []
+      },
+      "http": {
+        "all": true,
+        "request": true,
+        "scope": ["http://localhost:8000/*", "http://192.168.1.196:8000/*"]
+      },
+      "fs": {
+        "all": true,
+        "scope": ["$APPCONFIG/*", "$APPDATA/*", "$CACHE/*", "$RESOURCE/*", "$TEMP/*", "generated_images/*"]
       }
     },
     "bundle": {

@@ -2,6 +2,9 @@ import React from "react";
 import { useFocusTrap } from "../../hooks/useFocusTrap.js";
 import { generateImage } from "../../lib/cliService.js";
 import { dataUrlToFile } from "../../lib/files.js";
+import { comfyService } from "../../lib/comfyService.js";
+import { convertFileSrc } from "@tauri-apps/api/tauri";
+import { readBinaryFile } from "@tauri-apps/api/fs";
 
 const projectNameFromId = (projects, projectId) => projects?.[projectId]?.name || projectId || "";
 
@@ -84,6 +87,12 @@ export const AssetPickerModal = ({
   const [generatedImages, setGeneratedImages] = React.useState([]);
   const [selectedImageIndex, setSelectedImageIndex] = React.useState(0);
   const [generationError, setGenerationError] = React.useState(null);
+
+  // ComfyUI State
+  const [comfyConfig, setComfyConfig] = React.useState(comfyService.getConnection());
+  const [comfyForm, setComfyForm] = React.useState({ email: "", password: "" });
+  const [isComfyConnecting, setIsComfyConnecting] = React.useState(false);
+  const [comfyProgress, setComfyProgress] = React.useState({ status: "", percent: 0 });
   const initialFocusRef = React.useRef(null);
   const closeRef = React.useRef(null);
   const gridRef = React.useRef(null);
@@ -218,6 +227,34 @@ export const AssetPickerModal = ({
       const cols = colsForGrid();
       focusNavIndex(Math.max(0, navIndex - cols));
     }
+  };
+
+  const handleComfyAuth = async (isRegister = false) => {
+    if (!comfyForm.email || !comfyForm.password) return;
+    setIsComfyConnecting(true);
+    setGenerationError(null);
+    try {
+      const baseUrl = comfyConfig.url || "http://localhost:8000";
+      if (isRegister) {
+        await comfyService.register(baseUrl, comfyForm.email, comfyForm.password);
+      }
+      await comfyService.login(baseUrl, comfyForm.email, comfyForm.password);
+      setComfyConfig(comfyService.getConnection());
+    } catch (err) {
+      setGenerationError(`Connection failed: ${err.message}`);
+    } finally {
+      setIsComfyConnecting(false);
+    }
+  };
+
+  const fileToDataUrl = async (path) => {
+    const bytes = await readBinaryFile(path);
+    const blob = new Blob([bytes], { type: "image/png" });
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
   };
 
   const handlePick = (asset) => {
@@ -451,24 +488,40 @@ export const AssetPickerModal = ({
                     if (!prompt.trim() || !selectedCli) return;
                     setIsGenerating(true);
                     setGenerationError(null);
+                    setComfyProgress({ status: "starting", percent: 0 });
+                    
                     try {
-                      const result = await generateImage(selectedCli, prompt.trim());
-                      if (result.success && result.imageDataUrl) {
-                        const newImage = {
-                          id: `gen_${Date.now()}`,
-                          dataUrl: result.imageDataUrl,
-                          path: result.imagePath,
-                          timestamp: Date.now(),
-                        };
-                        setGeneratedImages((prev) => [...prev, newImage]);
-                        setSelectedImageIndex((prev) => prev === 0 && generatedImages.length === 0 ? 0 : generatedImages.length);
+                      let imageDataUrl = "";
+                      let imagePath = "";
+
+                      if (selectedCli === "comfyui") {
+                        const localPath = await comfyService.generateImage(prompt.trim(), (status, percent) => {
+                          setComfyProgress({ status, percent });
+                        });
+                        imagePath = localPath;
+                        imageDataUrl = await fileToDataUrl(localPath);
                       } else {
-                        setGenerationError(result.error || "Image generation failed. The CLI did not produce an image.");
+                        const result = await generateImage(selectedCli, prompt.trim());
+                        if (!result.success || !result.imageDataUrl) {
+                          throw new Error(result.error || "Generation failed");
+                        }
+                        imageDataUrl = result.imageDataUrl;
+                        imagePath = result.imagePath;
                       }
+
+                      const newImage = {
+                        id: `gen_${Date.now()}`,
+                        dataUrl: imageDataUrl,
+                        path: imagePath,
+                        timestamp: Date.now(),
+                      };
+                      setGeneratedImages((prev) => [...prev, newImage]);
+                      setSelectedImageIndex((prev) => prev === 0 && generatedImages.length === 0 ? 0 : generatedImages.length);
                     } catch (err) {
-                      setGenerationError(`Unexpected error: ${err.message || err}`);
+                      setGenerationError(`Generation failed: ${err.message || err}`);
                     } finally {
                       setIsGenerating(false);
+                      setComfyProgress({ status: "", percent: 0 });
                     }
                   }}
                 >
@@ -488,19 +541,80 @@ export const AssetPickerModal = ({
                   disabled={isGenerating}
                 >
                   {(cliStatus || []).map((cli) => (
-                    <option key={cli.id} value={cli.id} disabled={!cli.available}>
-                      {cli.name}{!cli.available ? " (not installed)" : ""}
+                    <option key={cli.id} value={cli.id} disabled={!cli.available && cli.id !== 'comfyui'}>
+                      {cli.name}{!cli.available && cli.id !== 'comfyui' ? " (not installed)" : ""}
                     </option>
                   ))}
-                  {(!cliStatus || cliStatus.length === 0) && (
-                    <>
-                      <option value="claude">Claude Code</option>
-                      <option value="codex">Codex</option>
-                      <option value="gemini">Gemini CLI</option>
-                    </>
-                  )}
                 </select>
               </div>
+
+              {selectedCli === "comfyui" && !comfyConfig.token && (
+                <div className="comfy-auth-overlay">
+                  <div className="comfy-auth-card">
+                    <h4>Connect to ComfyUI</h4>
+                    <p style={{ fontSize: "0.85em", color: "var(--muted)", marginBottom: "12px" }}>
+                      Local server required (Default: http://localhost:8000)
+                    </p>
+                    <input
+                      type="text"
+                      placeholder="Server URL"
+                      value={comfyConfig.url}
+                      onChange={(e) => setComfyConfig({ ...comfyConfig, url: e.target.value })}
+                      className="comfy-input"
+                    />
+                    <input
+                      type="email"
+                      placeholder="Email"
+                      value={comfyForm.email}
+                      onChange={(e) => setComfyForm({ ...comfyForm, email: e.target.value })}
+                      className="comfy-input"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Password"
+                      value={comfyForm.password}
+                      onChange={(e) => setComfyForm({ ...comfyForm, password: e.target.value })}
+                      className="comfy-input"
+                    />
+                    <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                      <button 
+                        className="btn-primary" 
+                        style={{ flex: 1 }}
+                        disabled={isComfyConnecting}
+                        onClick={() => handleComfyAuth(false)}
+                      >
+                        {isComfyConnecting ? "Connecting..." : "Login"}
+                      </button>
+                      <button 
+                        className="btn-secondary" 
+                        style={{ flex: 1 }}
+                        disabled={isComfyConnecting}
+                        onClick={() => handleComfyAuth(true)}
+                      >
+                        Register
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedCli === "comfyui" && comfyConfig.token && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--surface2)", borderRadius: "8px", marginTop: "12px", border: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#4caf50" }} />
+                    <span style={{ fontSize: "0.85em" }}>{comfyConfig.user?.email || "Connected"}</span>
+                  </div>
+                  <button 
+                    style={{ background: "transparent", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: "0.85em", fontWeight: "600" }}
+                    onClick={() => {
+                      comfyService.disconnect();
+                      setComfyConfig(comfyService.getConnection());
+                    }}
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              )}
               {generationError && (
                 <div className="generate-error" role="alert">
                   <strong>Error:</strong> {generationError}
@@ -512,7 +626,12 @@ export const AssetPickerModal = ({
                 {isGenerating ? (
                   <div className="generate-preview-loading">
                     <div className="generate-spinner-large" aria-hidden="true" />
-                    <span>Generating image with {(cliStatus || []).find(c => c.id === selectedCli)?.name || selectedCli}…</span>
+                    <span>
+                      {selectedCli === "comfyui" 
+                        ? `ComfyUI: ${comfyProgress.status}... ${comfyProgress.percent}%` 
+                        : `Generating image with ${(cliStatus || []).find(c => c.id === selectedCli)?.name || selectedCli}...`
+                      }
+                    </span>
                   </div>
                 ) : generatedImages.length > 0 && generatedImages[selectedImageIndex] ? (
                   <img
