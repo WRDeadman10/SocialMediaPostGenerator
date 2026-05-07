@@ -545,6 +545,7 @@ export const App = () => {
           busyAssetId={busyDefaultAssetId}
           uploadInputRef={pickerUploadRef}
           defaultPreviewUrl={defaultAssetUrlForPickerKind(imagePicker.kind, assetDefaults)}
+          initialPrompt={activePost?.rowData?.slide1_image_prompt || ""}
           page={pickerPage}
           pageSize={10}
           total={pickerTotal}

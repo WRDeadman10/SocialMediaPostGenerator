@@ -237,9 +237,12 @@ Older files may live directly under `projects/{id}/assets/` (flat). The app stil
 | single | Your Title | Body text | Learn More |
 
 **Carousel (6 slides):**
-| post_type | slide1_title | slide2_title | slide2_paragraph | ... | slide6_title | cta_text |
-|---|---|---|---|---|---|---|
-| carousel | Intro | Slide 2 | Body | ... | Final | Learn More |
+| post_type | slide1_image_prompt | slide1_title | slide2_title | slide2_paragraph | ... | slide6_title | cta_text |
+|---|---|---|---|---|---|---|---|
+| carousel | A futuristic city with flying cars | Intro | Slide 2 | Body | ... | Final | Learn More |
+
+> [!TIP]
+> The `slide1_image_prompt` column is automatically pre-filled in the **Generate** tab of the Asset Picker when you select a post, allowing for a seamless AI generation workflow.
 
 Download templates from the Upload Excel panel in the app.
 

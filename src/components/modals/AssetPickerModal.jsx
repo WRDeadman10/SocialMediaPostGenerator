@@ -73,11 +73,12 @@ export const AssetPickerModal = ({
   onUploadFile,
   onSetDefault,
   cliStatus,
+  initialPrompt,
 }) => {
   const [activeTab, setActiveTab] = React.useState("generate");
   const [hoverHighUrl, setHoverHighUrl] = React.useState("");
   const [navIndex, setNavIndex] = React.useState(0);
-  const [prompt, setPrompt] = React.useState("");
+  const [prompt, setPrompt] = React.useState(initialPrompt || "");
   const [selectedCli, setSelectedCli] = React.useState("");
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [generatedImages, setGeneratedImages] = React.useState([]);
