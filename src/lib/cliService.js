@@ -88,7 +88,9 @@ export async function generateImage(cli, prompt) {
   try {
     const { appDataDir } = await import("@tauri-apps/api/path");
     const appData = await appDataDir();
-    outputDir = `${appData}generated_images`;
+    // Ensure trailing slash for joining
+    const separator = appData.endsWith('\\') || appData.endsWith('/') ? '' : '\\';
+    outputDir = `${appData}${separator}generated_images`;
   } catch {
     // Fallback to a relative path
     outputDir = "./generated_images";

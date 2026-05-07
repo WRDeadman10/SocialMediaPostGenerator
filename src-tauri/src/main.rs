@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::fs;
 
@@ -21,15 +23,81 @@ struct GenerateResult {
     error: String,
 }
 
+/// Filter out noisy system warnings and hook failures to show the real error
+fn clean_error_message(raw: &str) -> String {
+    let mut lines: Vec<&str> = Vec::new();
+    let noise_patterns = [
+        "Unexpected token",
+        "Hook execution",
+        "Hook system message",
+        "CategoryInfo",
+        "FullyQualifiedErrorId",
+        "Warning: Windows 10 detected",
+        "Warning: 256-color support",
+        "claude-mem",
+        "hook",
+        "bun.exe",
+    ];
+
+    for line in raw.lines() {
+        let is_noise = noise_patterns.iter().any(|p| line.contains(p));
+        if !is_noise && !line.trim().is_empty() {
+            lines.push(line.trim());
+        }
+    }
+
+    if lines.is_empty() {
+        return raw.to_string();
+    }
+    lines.join("\n")
+}
+
 /// Helper to spawn a command correctly on Windows (.cmd/.ps1) and Unix
 fn spawn_command(binary: &str) -> Command {
-    if cfg!(windows) {
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/c").arg(binary);
-        cmd
+    let mut cmd = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.arg("/c").arg(binary);
+        #[cfg(windows)]
+        c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        c
     } else {
         Command::new(binary)
+    };
+
+    // On Windows, global npm packages often need node.exe in the PATH
+    // We try to find where node is and ensure it's in the environment
+    if cfg!(windows) {
+        // Set Gemini trust environment variable
+        cmd.env("GEMINI_CLI_TRUST_WORKSPACE", "true");
+        
+        // Suppress global node hooks/plugins that cause "Unexpected token" errors
+        cmd.env("NODE_OPTIONS", "");
+        cmd.env("NODE_PATH", "");
+        
+        // Prevent interactive prompts
+        cmd.env("CI", "true");
+
+        #[cfg(windows)]
+        let mut where_node = Command::new("where");
+        #[cfg(windows)]
+        where_node.arg("node").creation_flags(0x08000000);
+
+        if let Ok(output) = where_node.output() {
+            if let Ok(path_str) = String::from_utf8(output.stdout) {
+                if let Some(first_path) = path_str.lines().next() {
+                    if let Some(node_dir) = std::path::Path::new(first_path).parent() {
+                        let existing_path = std::env::var_os("PATH").unwrap_or_default();
+                        let mut new_path = node_dir.as_os_str().to_os_string();
+                        new_path.push(";");
+                        new_path.push(existing_path);
+                        cmd.env("PATH", new_path);
+                    }
+                }
+            }
+        }
     }
+
+    cmd
 }
 
 /// Check if a CLI tool is available by running `<name> --version`
@@ -48,10 +116,19 @@ fn check_cli(name: String) -> CliStatus {
         }
     };
 
-    // Try running --version
-    let result = spawn_command(binary)
+    // Primary attempt: standard shell execution
+    let mut result = spawn_command(binary)
         .arg("--version")
         .output();
+
+    // Fallback for Windows: Use powershell to find it (Get-Command)
+    if cfg!(windows) && (result.is_err() || !result.as_ref().unwrap().status.success()) {
+        let mut ps_cmd = Command::new("powershell");
+        ps_cmd.args(["-Command", &format!("{} --version", binary)]);
+        #[cfg(windows)]
+        ps_cmd.creation_flags(0x08000000);
+        result = ps_cmd.output();
+    }
 
     match result {
         Ok(output) if output.status.success() => {
@@ -76,16 +153,13 @@ fn check_cli(name: String) -> CliStatus {
 /// Build the wrapped prompt that instructs the CLI agent to generate an image
 fn build_generation_prompt(user_prompt: &str, output_path: &str) -> String {
     format!(
-        r#"Generate a social media image based on this description: {}
-
-Use your available tools to create the image. You may use any image generation API, library, or tool available to you.
+        "Generate a social media image based on this description: '{}'
 
 IMPORTANT RULES:
-1. Save the final image as a PNG file to exactly this path: {}
+1. Save the final image as a PNG file to exactly this path: '{}'
 2. The image should be high quality, suitable for social media (1080x1080 or similar).
-3. After saving, output ONLY the text "IMAGE_SAVED" on a new line and nothing else after it.
-4. Do NOT ask any follow-up questions. Just generate and save the image."#,
-        user_prompt, output_path
+3. Do NOT ask any follow-up questions. Just generate and save the image.",
+        user_prompt.replace("'", ""), output_path
     )
 }
 
@@ -115,8 +189,11 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
     // Build the wrapped prompt
     let full_prompt = build_generation_prompt(&prompt, &output_path_str);
 
+    println!("[CLI] Generating image with {}...", cli);
+    println!("[CLI] Output path: {}", output_path_str);
+
     // Build command based on CLI
-    let result = match cli.as_str() {
+    let mut result = match cli.as_str() {
         "claude" => {
             spawn_command("claude")
                 .args([
@@ -146,6 +223,7 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
                     "-p",
                     &full_prompt,
                     "--yolo",
+                    "--skip-trust",
                 ])
                 .output()
         }
@@ -159,10 +237,38 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
         }
     };
 
+    // Fallback for Windows: Try via PowerShell if primary failed
+    if cfg!(windows) && (result.is_err() || !result.as_ref().unwrap().status.success()) {
+        let ps_cmd = match cli.as_str() {
+            "claude" => format!("claude -p \"{}\" --allowedTools \"Bash(command:*),Read,Write\" --output-format text", full_prompt.replace("\"", "`\"")),
+            "codex" => format!("codex exec --quiet --approval-mode full-auto \"{}\"", full_prompt.replace("\"", "`\"")),
+            "gemini" => format!("gemini -p \"{}\" --yolo --skip-trust", full_prompt.replace("\"", "`\"")),
+            _ => String::new(),
+        };
+
+        if !ps_cmd.is_empty() {
+            let mut ps_runner = Command::new("powershell");
+            ps_runner.args(["-Command", &ps_cmd]);
+            #[cfg(windows)]
+            ps_runner.creation_flags(0x08000000);
+
+            if let Ok(ps_result) = ps_runner.output() {
+                if ps_result.status.success() {
+                    result = Ok(ps_result);
+                }
+            }
+        }
+    }
+
     match result {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            
+            println!("[CLI] Finished with status: {}", output.status);
+            if !output.status.success() {
+                println!("[CLI] Error Output: {}", stderr);
+            }
 
             // Check if the image file was created
             if output_path.exists() {
@@ -189,13 +295,13 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
                 }
             } else {
                 // Image wasn't created — return CLI output as error context
-                let error_msg = if !stderr.is_empty() {
-                    format!("CLI completed but no image was saved.\nStdout: {}\nStderr: {}", 
-                        stdout.chars().take(500).collect::<String>(),
-                        stderr.chars().take(500).collect::<String>())
+                let combined_err = format!("{}\n{}", stdout, stderr);
+                let cleaned_err = clean_error_message(&combined_err);
+                
+                let error_msg = if !cleaned_err.is_empty() {
+                    format!("CLI Error: {}", cleaned_err.chars().take(1000).collect::<String>())
                 } else {
-                    format!("CLI completed but no image was saved.\nOutput: {}", 
-                        stdout.chars().take(1000).collect::<String>())
+                    "CLI completed but no image was saved and no error was reported.".to_string()
                 };
 
                 GenerateResult {
