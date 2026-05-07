@@ -19,8 +19,10 @@ import { TopStepper } from "../components/workflow/TopStepper.jsx";
 import { AssetPickerModal } from "../components/modals/AssetPickerModal.jsx";
 import { EditModal } from "../components/modals/EditModal.jsx";
 import { NewProjectModal } from "../components/modals/NewProjectModal.jsx";
+import { CLIWarningModal } from "../components/modals/CLIWarningModal.jsx";
 import { FirstRunChecklist } from "../components/FirstRunChecklist.jsx";
 import { getWizardStatus } from "../lib/validation.js";
+import { detectCLIs, wasWarningDismissed, dismissWarning } from "../lib/cliService.js";
 import { AnimatePresence, motion } from "framer-motion";
 import { toastVariants } from "../motion/variants.js";
 
@@ -52,8 +54,21 @@ export const App = () => {
   const [wizardStep, setWizardStep] = React.useState("upload");
   const [leftOpen, setLeftOpen] = React.useState(true);
   const [rightOpen, setRightOpen] = React.useState(true);
+  const [cliStatus, setCliStatus] = React.useState([]);
+  const [showCliWarning, setShowCliWarning] = React.useState(false);
   const renderRef = React.useRef(null);
   const toastTimerRef = React.useRef(null);
+
+  // Detect CLI tools on mount
+  React.useEffect(() => {
+    detectCLIs().then((status) => {
+      setCliStatus(status);
+      const anyMissing = status.some((c) => !c.available);
+      if (anyMissing && !wasWarningDismissed()) {
+        setShowCliWarning(true);
+      }
+    });
+  }, []);
 
   const showToast = React.useCallback((input) => {
     const message = typeof input === "string" ? input : String(input?.message || "");
@@ -509,6 +524,15 @@ export const App = () => {
       ) : null}
       {editing && <EditModal row={editing.row} config={config} onClose={() => setEditing(null)} onSave={handleSaveEdit} />}
       {showNewProjectModal && <NewProjectModal onClose={() => setShowNewProjectModal(false)} onCreate={createNewProject} creating={creatingProject} />}
+      {showCliWarning && (
+        <CLIWarningModal
+          cliStatus={cliStatus}
+          onDismiss={() => {
+            setShowCliWarning(false);
+            dismissWarning();
+          }}
+        />
+      )}
       {imagePicker && (
         <AssetPickerModal
           title={imagePicker.title}
@@ -532,6 +556,7 @@ export const App = () => {
           onSearchChange={setPickerSearch}
           projectOnly={pickerProjectOnly}
           onProjectOnlyChange={setPickerProjectOnly}
+          cliStatus={cliStatus}
           onClose={() => setImagePicker(null)}
           onPick={async (asset) => {
             if (!asset?.url) return;

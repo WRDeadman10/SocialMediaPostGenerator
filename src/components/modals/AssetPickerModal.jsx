@@ -1,5 +1,7 @@
 import React from "react";
 import { useFocusTrap } from "../../hooks/useFocusTrap.js";
+import { generateImage } from "../../lib/cliService.js";
+import { dataUrlToFile } from "../../lib/files.js";
 
 const projectNameFromId = (projects, projectId) => projects?.[projectId]?.name || projectId || "";
 
@@ -70,14 +72,30 @@ export const AssetPickerModal = ({
   onUploadClick,
   onUploadFile,
   onSetDefault,
+  cliStatus,
 }) => {
   const [activeTab, setActiveTab] = React.useState("generate");
   const [hoverHighUrl, setHoverHighUrl] = React.useState("");
   const [navIndex, setNavIndex] = React.useState(0);
+  const [prompt, setPrompt] = React.useState("");
+  const [selectedCli, setSelectedCli] = React.useState("");
+  const [isGenerating, setIsGenerating] = React.useState(false);
+  const [generatedImages, setGeneratedImages] = React.useState([]);
+  const [selectedImageIndex, setSelectedImageIndex] = React.useState(0);
+  const [generationError, setGenerationError] = React.useState(null);
   const initialFocusRef = React.useRef(null);
   const closeRef = React.useRef(null);
   const gridRef = React.useRef(null);
   const itemRefs = React.useRef([]);
+  const thumbnailStripRef = React.useRef(null);
+
+  // Auto-select first available CLI
+  React.useEffect(() => {
+    if (cliStatus && cliStatus.length && !selectedCli) {
+      const first = cliStatus.find((c) => c.available);
+      if (first) setSelectedCli(first.id);
+    }
+  }, [cliStatus, selectedCli]);
 
   const titleId = React.useId();
   const { containerRef } = useFocusTrap({ enabled: true, onClose, initialFocusRef: initialFocusRef });
@@ -412,55 +430,125 @@ export const AssetPickerModal = ({
         )}
 
         {activeTab === "generate" && (
-          <div className="dialog-body" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", padding: "20px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div style={{ flex: 1, minHeight: "340px", border: "1px solid var(--border)", borderRadius: "12px", background: "var(--surface2)", padding: "16px", display: "flex", flexDirection: "column" }}>
-                <textarea 
-                  placeholder="Enter prompt to generate image..."
-                  style={{
-                    flex: 1,
-                    width: "100%",
-                    resize: "none",
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--text)",
-                    outline: "none",
-                    fontSize: "14px",
-                    fontFamily: "inherit"
-                  }}
+          <div className="dialog-body generate-body">
+            <div className="generate-left">
+              <div className="generate-prompt-box">
+                <textarea
+                  className="generate-prompt-input"
+                  placeholder="Describe the image you want to generate…"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  disabled={isGenerating}
                 />
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <button type="button" className="btn-primary" style={{ width: "auto", minWidth: "120px", padding: "10px 24px", margin: 0 }}>
-                  Generate
-                </button>
-                <select 
-                  style={{
-                    padding: "10px 16px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--border)",
-                    background: "var(--surface2)",
-                    color: "var(--text)",
-                    fontSize: "13px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    outline: "none"
+              <div className="generate-controls">
+                <button
+                  type="button"
+                  className="btn-primary generate-btn"
+                  disabled={isGenerating || !prompt.trim() || !selectedCli}
+                  onClick={async () => {
+                    if (!prompt.trim() || !selectedCli) return;
+                    setIsGenerating(true);
+                    setGenerationError(null);
+                    try {
+                      const result = await generateImage(selectedCli, prompt.trim());
+                      if (result.success && result.imageDataUrl) {
+                        const newImage = {
+                          id: `gen_${Date.now()}`,
+                          dataUrl: result.imageDataUrl,
+                          path: result.imagePath,
+                          timestamp: Date.now(),
+                        };
+                        setGeneratedImages((prev) => [...prev, newImage]);
+                        setSelectedImageIndex((prev) => prev === 0 && generatedImages.length === 0 ? 0 : generatedImages.length);
+                      } else {
+                        setGenerationError(result.error || "Image generation failed. The CLI did not produce an image.");
+                      }
+                    } catch (err) {
+                      setGenerationError(`Unexpected error: ${err.message || err}`);
+                    } finally {
+                      setIsGenerating(false);
+                    }
                   }}
                 >
-                  <option value="claude">Claude</option>
-                  <option value="gemini">Gemini</option>
-                  <option value="codex">Codex</option>
+                  {isGenerating ? (
+                    <>
+                      <span className="generate-spinner" aria-hidden="true" />
+                      Generating…
+                    </>
+                  ) : (
+                    "Generate"
+                  )}
+                </button>
+                <select
+                  className="generate-cli-select"
+                  value={selectedCli}
+                  onChange={(e) => setSelectedCli(e.target.value)}
+                  disabled={isGenerating}
+                >
+                  {(cliStatus || []).map((cli) => (
+                    <option key={cli.id} value={cli.id} disabled={!cli.available}>
+                      {cli.name}{!cli.available ? " (not installed)" : ""}
+                    </option>
+                  ))}
+                  {(!cliStatus || cliStatus.length === 0) && (
+                    <>
+                      <option value="claude">Claude Code</option>
+                      <option value="codex">Codex</option>
+                      <option value="gemini">Gemini CLI</option>
+                    </>
+                  )}
                 </select>
               </div>
-            </div>
-            <div style={{ border: "1px solid var(--border)", borderRadius: "12px", background: "var(--surface2)", display: "flex", flexDirection: "column", padding: "20px" }}>
-              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ color: "var(--muted2)", fontSize: "13px", fontWeight: "600", textAlign: "center" }}>
-                  Generated Image placeholder
+              {generationError && (
+                <div className="generate-error" role="alert">
+                  <strong>Error:</strong> {generationError}
                 </div>
+              )}
+            </div>
+            <div className="generate-right">
+              <div className="generate-preview-area">
+                {isGenerating ? (
+                  <div className="generate-preview-loading">
+                    <div className="generate-spinner-large" aria-hidden="true" />
+                    <span>Generating image with {(cliStatus || []).find(c => c.id === selectedCli)?.name || selectedCli}…</span>
+                  </div>
+                ) : generatedImages.length > 0 && generatedImages[selectedImageIndex] ? (
+                  <img
+                    className="generate-preview-img"
+                    src={generatedImages[selectedImageIndex].dataUrl}
+                    alt="Generated image preview"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="generate-preview-placeholder">
+                    <div className="generate-preview-placeholder-icon" aria-hidden="true">🎨</div>
+                    <span>Generated image will appear here</span>
+                  </div>
+                )}
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
-                <button type="button" className="btn-primary" style={{ padding: "8px 20px", width: "auto" }}>Select</button>
+              <div className="generate-select-row">
+                <button
+                  type="button"
+                  className="btn-primary generate-select-btn"
+                  disabled={!generatedImages.length || isGenerating}
+                  onClick={async () => {
+                    const img = generatedImages[selectedImageIndex];
+                    if (img && onUploadFile) {
+                      try {
+                        setIsGenerating(true);
+                        const file = await dataUrlToFile(img.dataUrl, `generated_${img.id}.png`);
+                        await onUploadFile(file);
+                      } catch (err) {
+                        setGenerationError(`Failed to upload selected image: ${err.message}`);
+                      } finally {
+                        setIsGenerating(false);
+                      }
+                    }
+                  }}
+                >
+                  Select
+                </button>
               </div>
             </div>
           </div>
@@ -468,22 +556,22 @@ export const AssetPickerModal = ({
 
         <div className="dialog-foot asset-dialog-foot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           {activeTab === "generate" ? (
-            <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingRight: "16px", flex: 1, alignItems: "center" }}>
-              {/* Thumbnails placeholder */}
-              {[1, 2, 3, 4, 5].map(i => (
-                <div 
-                  key={i} 
-                  style={{ 
-                    width: "56px", 
-                    height: "36px", 
-                    flexShrink: 0, 
-                    background: "var(--surface3)", 
-                    border: i === 1 ? "2px solid var(--accent)" : "1px solid var(--border)", 
-                    borderRadius: "6px",
-                    cursor: "pointer"
-                  }} 
-                />
+            <div className="generate-thumbnail-strip" ref={thumbnailStripRef}>
+              {generatedImages.map((img, i) => (
+                <button
+                  key={img.id}
+                  type="button"
+                  className={`generate-thumbnail ${i === selectedImageIndex ? "generate-thumbnail--active" : ""}`}
+                  onClick={() => setSelectedImageIndex(i)}
+                  aria-label={`Generated image ${i + 1}`}
+                  title={`Image ${i + 1} — ${new Date(img.timestamp).toLocaleTimeString()}`}
+                >
+                  <img src={img.dataUrl} alt="" draggable={false} />
+                </button>
               ))}
+              {generatedImages.length === 0 && (
+                <span className="generate-thumbnail-empty">Generated images will appear here</span>
+              )}
             </div>
           ) : (
             <div />

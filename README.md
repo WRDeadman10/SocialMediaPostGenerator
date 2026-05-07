@@ -14,12 +14,35 @@ Generate branded single-post and carousel images from Excel data. Built with Rea
 - Upload background, logo, last-slide logo, and per-row first-slide images (Firebase Storage)
 - **Asset library modal:** paginated inventory (10 per page), default preview in the header, low-res thumbnails in the grid, full-resolution preview on hover/focus, "Upload new" as the first card, and a new **"Generate" tab** for AI image generation with model selection (Claude, Gemini, Codex) and an interactive thumbnail gallery.
 - **Desktop Application (Tauri):** Wrapped with Tauri to build native Windows executables (requires Rust and MSVC tools).
+- **AI Image Generation (Desktop Only):** Generate high-quality images directly in the Asset Picker via agentic CLI tools. Supports **Claude Code**, **Gemini CLI**, and **Codex**.
 - **Storage layout (new uploads):** images are stored under typed folders per project — `assets/logo/`, `assets/background/`, `assets/last-slide-logo/`, `assets/first-slide-image/` (legacy flat `assets/` files are still listed)
 - Client-generated **JPEG thumbnails** on upload; listings prefer `thumbUrl` when present
 - Edit post content inline (click text on the canvas to edit)
 - Edit full post fields via the **Edit** button (modal editor)
 - Smooth UI animations + “card deal” animation when posts populate (with subtle SFX)
 - Export PNG/JPG per slide, export selected slides, or download all as ZIP
+
+## AI Image Generation Setup
+
+To enable AI image generation in the desktop app, you should install at least one of the supported CLI tools globally:
+
+### 1. Claude Code (Recommended)
+No API key required if already logged in via CLI.
+```bash
+npm i -g @anthropic-ai/claude-code
+```
+
+### 2. Gemini CLI
+```bash
+npm i -g @google/gemini-cli
+```
+
+### 3. Codex
+Requires `OPENAI_API_KEY` environment variable.
+```bash
+npm i -g @openai/codex
+# Windows: set OPENAI_API_KEY=sk-...
+```
 
 ## Tech Stack
 
@@ -169,6 +192,13 @@ npm run tauri build
 7. Export from the right panel (PNG/JPG, selected slides, or ZIP)
 
 ## Troubleshooting
+
+### Fatal error LNK1207: incompatible PDB format
+This can happen during `npm run tauri dev` or `build` if the debug database becomes corrupted.
+**Fix:** Delete the `src-tauri/target` directory and rebuild:
+```powershell
+cd src-tauri; cargo clean; cd ..; npm run tauri dev
+```
 
 ### Image upload fails with CORS / preflight error
 
