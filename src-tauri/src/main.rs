@@ -7,6 +7,7 @@ use std::process::Command;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::fs;
+use tauri::Manager;
 
 #[derive(Serialize, Deserialize)]
 struct CliStatus {
@@ -317,7 +318,7 @@ async fn run_cli_generate(cli: String, prompt: String, output_dir: String) -> Ge
 }
 
 #[tauri::command]
-async fn save_comfy_image(url: String, auth_token: String, filename: String) -> Result<String, String> {
+async fn save_comfy_image(app_handle: tauri::AppHandle, url: String, auth_token: String, filename: String) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -337,7 +338,11 @@ async fn save_comfy_image(url: String, auth_token: String, filename: String) -> 
 
     let bytes = response.bytes().await.map_err(|e| format!("Failed to read image bytes: {}", e))?;
 
-    let out_dir = PathBuf::from("generated_images");
+    let mut out_dir = app_handle.path_resolver().app_data_dir()
+        .ok_or_else(|| "Could not determine app data directory".to_string())?;
+    
+    out_dir.push("generated_images");
+    
     if !out_dir.exists() {
         fs::create_dir_all(&out_dir).map_err(|e| format!("Failed to create output directory: {}", e))?;
     }
@@ -345,10 +350,7 @@ async fn save_comfy_image(url: String, auth_token: String, filename: String) -> 
     let file_path = out_dir.join(&filename);
     fs::write(&file_path, bytes).map_err(|e| format!("Failed to save image file: {}", e))?;
 
-    let full_path = fs::canonicalize(&file_path)
-        .unwrap_or(file_path)
-        .to_string_lossy()
-        .to_string();
+    let full_path = file_path.to_string_lossy().to_string();
 
     Ok(full_path)
 }
