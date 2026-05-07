@@ -27,7 +27,7 @@
       },
       "fs": {
         "all": true,
-        "scope": ["$APPCONFIG/*", "$APPDATA/*", "$CACHE/*", "$RESOURCE/*", "$TEMP/*", "generated_images/*"]
+        "scope": ["$APPCONFIG/**", "$APPDATA/**", "$CACHE/**", "$RESOURCE/**", "$TEMP/**", "generated_images/**"]
       }
     },
     "bundle": {
