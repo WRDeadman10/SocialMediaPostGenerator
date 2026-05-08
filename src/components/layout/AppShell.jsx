@@ -7,7 +7,7 @@ export const AppShell = ({
   left,
   center,
   right,
-  footer,
+  bottom,
   leftOpen = true,
   rightOpen = true,
 }) => {
@@ -16,42 +16,47 @@ export const AppShell = ({
       <header className="app-topbar">
         {top}
       </header>
-      <div className="app-shell-body">
-        <motion.aside
-          className="app-panel app-panel-left"
-          aria-label="Configuration"
-          initial={false}
-          animate={leftOpen ? "openLeft" : "closedLeft"}
-          variants={panelVariants}
-          style={{ width: leftOpen ? 280 : 0 }}
-          transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <div className="app-panel-inner" aria-hidden={!leftOpen}>
-            {left}
-          </div>
-        </motion.aside>
-        <section className="app-canvas" aria-label="Live canvas">
-          {center}
-        </section>
-        <motion.aside
-          className="app-panel app-panel-right"
-          aria-label="Output and actions"
-          initial={false}
-          animate={rightOpen ? "openRight" : "closedRight"}
-          variants={panelVariants}
-          style={{ width: rightOpen ? 300 : 0 }}
-          transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <div className="app-panel-inner" aria-hidden={!rightOpen}>
-            {right}
-          </div>
-        </motion.aside>
-      </div>
-      {footer ? (
-        <div className="app-shell-footer">
-          {footer}
+      <div className="app-shell-main">
+        <div className="app-shell-body">
+          <motion.aside
+            className="app-panel app-panel-left"
+            aria-label="Slide Navigator"
+            initial={false}
+            animate={leftOpen ? "openLeft" : "closedLeft"}
+            variants={panelVariants}
+            style={{ width: leftOpen ? 240 : 0 }}
+            transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="app-panel-inner" aria-hidden={!leftOpen}>
+              {left}
+            </div>
+          </motion.aside>
+
+          <section className="app-canvas" aria-label="Main editing canvas">
+            {center}
+          </section>
+
+          <motion.aside
+            className="app-panel app-panel-right"
+            aria-label="Production Pipeline"
+            initial={false}
+            animate={rightOpen ? "openRight" : "closedRight"}
+            variants={panelVariants}
+            style={{ width: rightOpen ? 320 : 0 }}
+            transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="app-panel-inner" aria-hidden={!rightOpen}>
+              {right}
+            </div>
+          </motion.aside>
         </div>
-      ) : null}
+
+        {bottom && (
+          <div className="app-shell-timeline">
+            {bottom}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

@@ -107,7 +107,7 @@ export const comfyService = {
   /**
    * Queue and poll for image generation
    */
-  async generateImage(prompt, options = {}, onProgress) {
+  async generateImage(prompt, options = {}, onProgress, onJobId) {
     const { url, token } = this.getConnection();
     if (!url || !token) throw new Error("Not connected to ComfyUI");
 
@@ -144,6 +144,7 @@ export const comfyService = {
     }
 
     console.log("[ComfyUI] Job queued:", jobId);
+    if (onJobId) onJobId(jobId);
     if (onProgress) onProgress("queued", 0);
 
     // 2. Poll for status using the recommended logic
@@ -221,5 +222,22 @@ export const comfyService = {
     };
 
     return await poll();
+  },
+
+  /**
+   * Cancel an active generation job
+   */
+  async cancelJob(jobId) {
+    const { url, token } = this.getConnection();
+    if (!url || !token || !jobId) return;
+
+    try {
+      await fetch(`${url}/api/v1/generation/jobs/${jobId}/cancel`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+    } catch (e) {
+      console.error("[ComfyUI] Failed to cancel job:", e);
+    }
   }
 };

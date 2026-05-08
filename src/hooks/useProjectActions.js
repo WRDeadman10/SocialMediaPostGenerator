@@ -84,14 +84,16 @@ export const useProjectActions = ({
     });
   }, [activeProjectId, setGenerated, setProjects, setRows, setVisible, showToast]);
 
-  const loadProject = React.useCallback((id) => {
-    const project = projects[id];
-    if (!project) return;
-    setActiveProjectId(id);
-    applyProject(project, { setConfig, setRows, setGenerated, setVisible });
-    validateProjectAssets(project);
-    showToast(`Loaded: ${project.name}`);
-  }, [projects, setActiveProjectId, setConfig, setGenerated, setRows, setVisible, showToast, validateProjectAssets]);
+  const updateProject = React.useCallback((id, patch) => {
+    setProjects((prev) => {
+      const current = prev[id];
+      if (!current) return prev;
+      return {
+        ...prev,
+        [id]: { ...current, ...patch, updatedAt: new Date().toISOString() },
+      };
+    });
+  }, [setProjects]);
 
-  return { createNewProject, handleUpload, loadProject };
+  return { createNewProject, handleUpload, loadProject, updateProject };
 };

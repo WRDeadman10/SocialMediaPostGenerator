@@ -7,7 +7,6 @@ use std::process::Command;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::fs;
-use tauri::Manager;
 
 #[derive(Serialize, Deserialize)]
 struct CliStatus {

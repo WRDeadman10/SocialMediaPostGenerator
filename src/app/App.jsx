@@ -11,20 +11,20 @@ import { useProjectActions } from "../hooks/useProjectActions.js";
 import { useProjectPersistence } from "../hooks/useProjectPersistence.js";
 import { useSfx } from "../hooks/useSfx.js";
 import { AppShell } from "../components/layout/AppShell.jsx";
-import { ConfigWorkspace } from "../components/config/ConfigWorkspace.jsx";
 import { OutputPanel } from "../components/output/OutputPanel.jsx";
 import { CanvasEditor } from "../components/canvas/CanvasEditor.jsx";
 import { InlineTextEditor } from "../components/canvas/InlineTextEditor.jsx";
-import { TopStepper } from "../components/workflow/TopStepper.jsx";
 import { AssetPickerModal } from "../components/modals/AssetPickerModal.jsx";
 import { EditModal } from "../components/modals/EditModal.jsx";
-import { NewProjectModal } from "../components/modals/NewProjectModal.jsx";
 import { CLIWarningModal } from "../components/modals/CLIWarningModal.jsx";
 import { FirstRunChecklist } from "../components/FirstRunChecklist.jsx";
 import { getWizardStatus } from "../lib/validation.js";
 import { detectCLIs, wasWarningDismissed, dismissWarning } from "../lib/cliService.js";
 import { AnimatePresence, motion } from "framer-motion";
 import { toastVariants } from "../motion/variants.js";
+import { GlobalHeader } from "../components/layout/Header/GlobalHeader.jsx";
+import { NavigatorSidebar } from "../components/layout/NavigatorSidebar.jsx";
+import { ProjectWizard } from "../components/modals/ProjectWizard/ProjectWizard.jsx";
 
 export const App = () => {
   const [config, setConfig] = React.useState(defaultConfig);
@@ -40,6 +40,8 @@ export const App = () => {
   const [toastTone, setToastTone] = React.useState("info");
   const [toastAction, setToastAction] = React.useState(null);
   const [showNewProjectModal, setShowNewProjectModal] = React.useState(false);
+  const [wizardStep, setWizardStep] = React.useState(1);
+  const [wizardMode, setWizardMode] = React.useState("new"); // "new" | "edit"
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [animateSeed, setAnimateSeed] = React.useState(0);
   const [generateBusy, setGenerateBusy] = React.useState(false);
@@ -51,7 +53,6 @@ export const App = () => {
   const [activeSlideIndex, setActiveSlideIndex] = React.useState(0);
   const [inlineSelection, setInlineSelection] = React.useState(null);
   const [inlineDraft, setInlineDraft] = React.useState("");
-  const [wizardStep, setWizardStep] = React.useState("upload");
   const [leftOpen, setLeftOpen] = React.useState(true);
   const [rightOpen, setRightOpen] = React.useState(true);
   const [cliStatus, setCliStatus] = React.useState([]);
@@ -153,7 +154,7 @@ export const App = () => {
     showToast,
   });
 
-  const { createNewProject, handleUpload, loadProject } = useProjectActions({
+  const { createNewProject, handleUpload, loadProject, updateProject } = useProjectActions({
     activeProjectId,
     projects,
     setProjects,
@@ -390,83 +391,48 @@ export const App = () => {
     <div className="shell">
       <AppShell
         top={(
-          <>
-            <div className="brand">
-              <div className="brand-icon">✦</div>
-              <div><b>Post Generator</b><span>VIITORCLOUD</span></div>
-            </div>
-            <TopStepper
-              status={wizard}
-              onSelectStep={(id) => setWizardStep(id)}
-            />
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button
-                type="button"
-                className="theme-btn"
-                onClick={() => setLeftOpen((v) => !v)}
-                aria-pressed={leftOpen}
-                aria-label={leftOpen ? "Collapse left panel" : "Expand left panel"}
-                title={leftOpen ? "Collapse left panel" : "Expand left panel"}
-              >
-                ⟨
-              </button>
-              <button
-                type="button"
-                className="theme-btn"
-                onClick={() => setSfxMuted(!sfxMuted)}
-                aria-pressed={!sfxMuted}
-                aria-label={sfxMuted ? "Unmute interface sounds" : "Mute interface sounds"}
-                title={sfxMuted ? "Sound off" : "Sound on"}
-              >
-                {sfxMuted ? "🔇" : "🔊"}
-              </button>
-              <button
-                type="button"
-                className="theme-btn"
-                onClick={() => updateConfig({ theme: config.theme === "dark" ? "light" : "dark" })}
-                aria-label="Toggle theme"
-              >
-                {config.theme === "dark" ? "☀" : "☾"}
-              </button>
-              <button
-                type="button"
-                className="theme-btn"
-                onClick={() => setRightOpen((v) => !v)}
-                aria-pressed={rightOpen}
-                aria-label={rightOpen ? "Collapse right panel" : "Expand right panel"}
-                title={rightOpen ? "Collapse right panel" : "Expand right panel"}
-              >
-                ⟩
-              </button>
-            </div>
-          </>
+          <GlobalHeader
+            projects={projects}
+            activeProjectId={activeProjectId}
+            onSelectProject={loadProject}
+            onNewProject={() => {
+              setWizardMode("new");
+              setWizardStep(1);
+              setShowNewProjectModal(true);
+            }}
+            onEditBranding={() => {
+              if (!activeProjectId) {
+                showToast({ message: "Select a project first", tone: "error" });
+                return;
+              }
+              setWizardMode("edit");
+              setWizardStep(3); // Go to Branding step
+              setShowNewProjectModal(true);
+            }}
+            onExport={() => {
+              // This will later open the Export Center
+              showToast({ message: "Export Center coming soon", tone: "info" });
+            }}
+            onToggleLeft={() => setLeftOpen((v) => !v)}
+            onToggleRight={() => setRightOpen((v) => !v)}
+            leftOpen={leftOpen}
+            rightOpen={rightOpen}
+            theme={config.theme}
+            onToggleTheme={() => updateConfig({ theme: config.theme === "dark" ? "light" : "dark" })}
+            sfxMuted={sfxMuted}
+            onToggleSfx={() => setSfxMuted(!sfxMuted)}
+          />
         )}
         leftOpen={leftOpen}
         rightOpen={rightOpen}
         left={(
-          <ConfigWorkspace
-            projects={projects}
-            activeProjectId={activeProjectId}
-            loadProject={loadProject}
-            setShowNewProjectModal={setShowNewProjectModal}
-            activeProject={activeProject}
+          <NavigatorSidebar
             rows={rows}
-            config={config}
-            updateConfig={updateConfig}
-            updateBar={updateBar}
-            handleUpload={handleUpload}
-            downloadTemplate={downloadTemplate}
-            stats={stats}
             generated={generated}
-            uploadLoading={uploadLoading}
-            mergeClientConfigWithDefaults={mergeClientConfigWithDefaults}
-            handleOpenImagePicker={handleOpenImagePicker}
-            setConfigImage={setConfigImage}
-            onGenerateAll={handleGenerateAll}
+            activePostIndex={activePostIndex}
+            onSelectPost={(i) => setActivePostIndex(i)}
             generateBusy={generateBusy}
-            downloadZip={() => downloadZip(generated, { baseName: exportBaseName, zipName: exportZipName })}
-            onApplyBrandingDefaults={handleApplyBrandingDefaults}
-            onResetBrandingOverrides={handleResetBrandingOverrides}
+            stats={stats}
           />
         )}
         center={(
@@ -512,6 +478,11 @@ export const App = () => {
             onExportSelectedSlides={handleExportSelectedSlides}
           />
         )}
+        bottom={(
+          <div className="placeholder-timeline" style={{ padding: 20, color: "var(--muted)", textAlign: "center" }}>
+            Slide Timeline (Navigator) coming soon...
+          </div>
+        )}
       />
       {inlineSelection ? (
         <InlineTextEditor
@@ -523,7 +494,33 @@ export const App = () => {
         />
       ) : null}
       {editing && <EditModal row={editing.row} config={config} onClose={() => setEditing(null)} onSave={handleSaveEdit} />}
-      {showNewProjectModal && <NewProjectModal onClose={() => setShowNewProjectModal(false)} onCreate={createNewProject} creating={creatingProject} />}
+      {showNewProjectModal && (
+        <ProjectWizard
+          isOpen={showNewProjectModal}
+          onClose={() => setShowNewProjectModal(false)}
+          onSave={async (data) => {
+            if (wizardMode === "new") {
+              await createNewProject(data.name);
+            } else {
+              updateProject(activeProjectId, { name: data.name });
+            }
+            // Sync current state with wizard data
+            setConfig(data.config);
+            setRows(data.rows);
+            setShowNewProjectModal(false);
+          }}
+          onUploadData={handleUpload}
+          onOpenPicker={handleOpenImagePicker}
+          onUploadFile={setConfigImage}
+          uploadLoading={uploadLoading}
+          initialStep={wizardStep}
+          initialData={{
+             name: wizardMode === "edit" ? (activeProject?.name || "") : "",
+             config: { ...config },
+             rows: rows
+          }}
+        />
+      )}
       {showCliWarning && (
         <CLIWarningModal
           cliStatus={cliStatus}
