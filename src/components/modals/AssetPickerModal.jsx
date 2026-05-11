@@ -51,6 +51,7 @@ const pushRecent = (kind, asset) => {
 export const AssetPickerModal = ({
   title,
   pickerKind,
+  libraryOnly = false,
   projects,
   activeProjectId,
   assets,
@@ -78,7 +79,7 @@ export const AssetPickerModal = ({
   cliStatus,
   initialPrompt,
 }) => {
-  const [activeTab, setActiveTab] = React.useState("generate");
+  const [activeTab, setActiveTab] = React.useState(libraryOnly ? "upload" : "generate");
   const [hoverHighUrl, setHoverHighUrl] = React.useState("");
   const [navIndex, setNavIndex] = React.useState(0);
   const [prompt, setPrompt] = React.useState(initialPrompt || "");
@@ -142,6 +143,10 @@ export const AssetPickerModal = ({
       setSelectedLibraryAsset(filteredAssets[0]);
     }
   }, [activeTab, filteredAssets, selectedLibraryAsset]);
+
+  React.useEffect(() => {
+    if (libraryOnly && activeTab !== "upload") setActiveTab("upload");
+  }, [activeTab, libraryOnly]);
 
   // Timer logic
   React.useEffect(() => {
@@ -332,13 +337,15 @@ export const AssetPickerModal = ({
           
           <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
             <div style={{ display: "flex", gap: "4px" }}>
-              <button
-                type="button"
-                className={`ap-preset-btn ${activeTab === "generate" ? "active" : ""}`}
-                onClick={() => setActiveTab("generate")}
-              >
-                Generate
-              </button>
+              {!libraryOnly ? (
+                <button
+                  type="button"
+                  className={`ap-preset-btn ${activeTab === "generate" ? "active" : ""}`}
+                  onClick={() => setActiveTab("generate")}
+                >
+                  Generate
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={`ap-preset-btn ${activeTab === "upload" ? "active" : ""}`}

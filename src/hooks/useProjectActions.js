@@ -95,5 +95,20 @@ export const useProjectActions = ({
     });
   }, [setProjects]);
 
+  const loadProject = React.useCallback((projectId) => {
+    const id = String(projectId || "");
+    if (!id) return;
+    const project = projects?.[id];
+    if (!project) {
+      showToast("Could not load project");
+      return;
+    }
+
+    setActiveProjectId(id);
+    if (validateProjectAssets) validateProjectAssets(project);
+    applyProject(project, { setConfig, setRows, setGenerated, setVisible });
+    showToast({ message: `Loaded "${project.name || id}"`, tone: "success" });
+  }, [projects, setActiveProjectId, setConfig, setGenerated, setRows, setVisible, showToast, validateProjectAssets]);
+
   return { createNewProject, handleUpload, loadProject, updateProject };
 };

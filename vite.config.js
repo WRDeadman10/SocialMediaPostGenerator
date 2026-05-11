@@ -5,7 +5,9 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
-    port: 5173,
+    // Use a fixed port that won't collide with other Vite projects.
+    // This must match `src-tauri/tauri.conf.json` build.devPath.
+    port: 5174,
     strictPort: true,
     host: "127.0.0.1",
   },

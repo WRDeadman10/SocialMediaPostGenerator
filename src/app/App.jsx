@@ -25,6 +25,7 @@ import { toastVariants } from "../motion/variants.js";
 import { GlobalHeader } from "../components/layout/Header/GlobalHeader.jsx";
 import { NavigatorSidebar } from "../components/layout/NavigatorSidebar.jsx";
 import { ProjectWizard } from "../components/modals/ProjectWizard/ProjectWizard.jsx";
+import { ExportCenterModal } from "../components/modals/ExportCenterModal.jsx";
 
 export const App = () => {
   const [config, setConfig] = React.useState(defaultConfig);
@@ -57,6 +58,7 @@ export const App = () => {
   const [rightOpen, setRightOpen] = React.useState(true);
   const [cliStatus, setCliStatus] = React.useState([]);
   const [showCliWarning, setShowCliWarning] = React.useState(false);
+  const [showExportCenter, setShowExportCenter] = React.useState(false);
   const renderRef = React.useRef(null);
   const toastTimerRef = React.useRef(null);
 
@@ -190,7 +192,8 @@ export const App = () => {
     onGeneratedCountSfx(generated);
   }, [generated, onGeneratedCountSfx]);
 
-  const { downloadPost, downloadZip } = React.useMemo(() => createPostExporter(renderRef), []);
+  const exporter = React.useMemo(() => createPostExporter(renderRef), []);
+  const { downloadPost, downloadZip } = exporter;
 
   React.useEffect(() => {
     document.documentElement.dataset.theme = config.theme;
@@ -410,8 +413,11 @@ export const App = () => {
               setShowNewProjectModal(true);
             }}
             onExport={() => {
-              // This will later open the Export Center
-              showToast({ message: "Export Center coming soon", tone: "info" });
+              if (!activeProjectId) {
+                showToast({ message: "Select a project first", tone: "error" });
+                return;
+              }
+              setShowExportCenter(true);
             }}
             onToggleLeft={() => setLeftOpen((v) => !v)}
             onToggleRight={() => setRightOpen((v) => !v)}
@@ -478,11 +484,6 @@ export const App = () => {
             onExportSelectedSlides={handleExportSelectedSlides}
           />
         )}
-        bottom={(
-          <div className="placeholder-timeline" style={{ padding: 20, color: "var(--muted)", textAlign: "center" }}>
-            Slide Timeline (Navigator) coming soon...
-          </div>
-        )}
       />
       {inlineSelection ? (
         <InlineTextEditor
@@ -498,6 +499,7 @@ export const App = () => {
         <ProjectWizard
           isOpen={showNewProjectModal}
           onClose={() => setShowNewProjectModal(false)}
+          sessionKey={`${wizardMode}:${activeProjectId || "new"}`}
           onSave={async (data) => {
             if (wizardMode === "new") {
               await createNewProject(data.name);
@@ -534,6 +536,7 @@ export const App = () => {
         <AssetPickerModal
           title={imagePicker.title}
           pickerKind={imagePicker.kind}
+          libraryOnly={!!imagePicker.libraryOnly}
           projects={projects}
           activeProjectId={activeProjectId}
           assets={pickerAssets}
@@ -566,6 +569,17 @@ export const App = () => {
           onSetDefault={(asset) => handleSetDefaultAsset(asset)}
         />
       )}
+      {showExportCenter ? (
+        <ExportCenterModal
+          isOpen={showExportCenter}
+          onClose={() => setShowExportCenter(false)}
+          projectName={activeProject?.name || activeProjectId}
+          generated={generated}
+          activePostIndex={activePostIndex}
+          activeSlideIndex={activeSlideIndex}
+          renderCanvas={exporter.renderCanvas}
+        />
+      ) : null}
       <div ref={renderRef} className="render-area" />
       <AnimatePresence mode="wait" initial={false}>
         {toast ? (

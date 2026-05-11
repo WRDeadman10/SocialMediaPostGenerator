@@ -291,8 +291,10 @@ export const useImagePipeline = ({
     try {
       const url = await storeImageAsset(file, kind, `sidebar:${kind}`);
       if (url) setConfig((prev) => ({ ...prev, [key]: url }));
+      return url || "";
     } catch (error) {
       showToast(error.message);
+      return "";
     }
   }, [setConfig, showToast, storeImageAsset]);
 

@@ -9,11 +9,18 @@ const safeFilePart = (value) => String(value || "export")
   .slice(0, 80) || "export";
 
 export const createPostExporter = (renderRef) => {
-  const renderCanvas = async (html) => {
+  const renderCanvas = async (html, options = {}) => {
+    const scale = typeof options.scale === "number" ? options.scale : 2;
+    const transparent = options.transparent !== false;
     renderRef.current.innerHTML = html;
     await new Promise((r) => setTimeout(r, 80));
     const canvas = await html2canvas(renderRef.current.firstElementChild, {
-      scale: 2, useCORS: true, backgroundColor: null, width: 800, height: 1000, logging: false,
+      scale,
+      useCORS: true,
+      backgroundColor: transparent ? null : "#ffffff",
+      width: 800,
+      height: 1000,
+      logging: false,
     });
     renderRef.current.innerHTML = "";
     return canvas;
